@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import BinaryIO, ClassVar, Literal, assert_never
 
 import typer
+from typing_extensions import cast
 
 app = typer.Typer()
 
@@ -1038,16 +1039,6 @@ def is_binary(data: bytes) -> bool:
     return b"\0" in data
 
 
-def resolve_color(*, mode: str, stdout: BinaryIO, git_mode: bool) -> bool:
-    if mode == "always":
-        return True
-    if mode == "never":
-        return False
-    if mode == "auto":
-        return stdout.isatty() or (git_mode and invoked_by_git())
-    raise ValueError("-color must be one of: auto, always, never")
-
-
 def invoked_by_git() -> bool:
     return bool(
         os.environ.get("GIT_DIFF_PATH_COUNTER") or os.environ.get("GIT_EXTERNAL_DIFF")
@@ -1113,47 +1104,48 @@ def run_git_mode(
     return "".join(out), 1
 
 
+def use_color(
+    *, color_mode: Literal["auto", "never", "always"], stdout: BinaryIO, git_mode: bool
+) -> bool:
+    match color_mode:
+        case "always":
+            return True
+        case "never":
+            return False
+        case "auto":
+            return stdout.isatty() or (git_mode and invoked_by_git())
+        case _:
+            assert_never(color_mode)
+
+
 @dataclass(frozen=True, kw_only=True)
 class Args:
     old_path: str
     new_path: str
     context: int = 16
     find_moves: bool = True
-    color: str = "auto"
+    color: Literal["auto", "never", "always"] = "auto"
     whitespace: bool = False
 
     def __post_init__(self) -> None:
         self.main()
 
     def main(self) -> None:
-        if self.context < 0:
-            typer.echo("pdiff: --context must be >= 0", err=True)
-            raise typer.Exit(2)
-        try:
-            use_color = resolve_color(
-                mode=self.color, stdout=sys.stdout.buffer, git_mode=False
-            )
-        except ValueError as exc:
-            typer.echo(f"pdiff: {exc}", err=True)
-            raise typer.Exit(2) from exc
-        ignore_ws = not self.whitespace
-        try:
-            prev_data = Path(self.old_path).read_bytes()
-            next_data = Path(self.new_path).read_bytes()
-        except OSError as exc:
-            target = (
-                self.old_path if not Path(self.old_path).exists() else self.new_path
-            )
-            typer.echo(f"pdiff: read {target}: {exc}", err=True)
-            raise typer.Exit(2) from exc
+        assert self.context >= 0
+
+        prev_data = Path(self.old_path).read_bytes()
+        next_data = Path(self.new_path).read_bytes()
+
         out, changed = diff_output(
             prev_data=prev_data,
             next_data=next_data,
             prev_name=self.old_path,
             next_name=self.new_path,
             context=self.context,
-            color=use_color,
-            ignore_whitespace=ignore_ws,
+            color=use_color(
+                color_mode=self.color, stdout=sys.stdout.buffer, git_mode=False
+            ),
+            ignore_whitespace=not self.whitespace,
             find_moves=self.find_moves,
         )
         if out:
@@ -1163,21 +1155,19 @@ class Args:
 
 @dataclass(frozen=True, kw_only=True)
 class StdinArgs:
-    color: str = "auto"
+    color: Literal["auto", "never", "always"] = "auto"
 
     def __post_init__(self) -> None:
         self.main()
 
     def main(self) -> None:
-        try:
-            use_color = resolve_color(
-                mode=self.color, stdout=sys.stdout.buffer, git_mode=False
-            )
-        except ValueError as exc:
-            typer.echo(f"pdiff: {exc}", err=True)
-            raise typer.Exit(2) from exc
         sys.stdout.write(
-            refine_unified_diff_input(data=sys.stdin.buffer.read(), color=use_color)
+            refine_unified_diff_input(
+                data=sys.stdin.buffer.read(),
+                color=use_color(
+                    color_mode=self.color, stdout=sys.stdout.buffer, git_mode=False
+                ),
+            )
         )
         raise typer.Exit(0)
 
@@ -1199,7 +1189,7 @@ class GitArgs:
     info: str | None = None
     context: int = GIT_CONTEXT
     find_moves: bool = True
-    color: str = "auto"
+    color: Literal["auto", "never", "always"] = "auto"
     whitespace: bool = False
 
     def __post_init__(self) -> None:
@@ -1222,20 +1212,15 @@ class GitArgs:
             args.append(self.new_path)
         if self.info is not None:
             args.append(self.info)
-        try:
-            use_color = resolve_color(
-                mode=self.color, stdout=sys.stdout.buffer, git_mode=True
-            )
-            out, _code = run_git_mode(
-                args=args,
-                context=self.context,
-                color=use_color,
-                ignore_whitespace=not self.whitespace,
-                find_moves=self.find_moves,
-            )
-        except (OSError, ValueError) as exc:
-            typer.echo(f"pdiff: {exc}", err=True)
-            raise typer.Exit(2) from exc
+        out, _code = run_git_mode(
+            args=args,
+            context=self.context,
+            color=use_color(
+                color_mode=self.color, stdout=sys.stdout.buffer, git_mode=True
+            ),
+            ignore_whitespace=not self.whitespace,
+            find_moves=self.find_moves,
+        )
         if out:
             sys.stdout.write(out)
         raise typer.Exit(0)
@@ -1255,14 +1240,14 @@ def diff_cmd(
         new_path=new_path,
         context=context,
         find_moves=find_moves,
-        color=color,
+        color=cast(Literal["auto", "never", "always"], color),
         whitespace=whitespace,
     )
 
 
 @app.command()
 def stdin(color: str = "auto") -> None:
-    StdinArgs(color=color)
+    StdinArgs(color=cast(Literal["auto", "never", "always"], color))
 
 
 @app.command()
@@ -1293,7 +1278,7 @@ def git(
         info=info,
         context=context,
         find_moves=find_moves,
-        color=color,
+        color=cast(Literal["auto", "never", "always"], color),
         whitespace=whitespace,
     )
 
