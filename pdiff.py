@@ -21,9 +21,6 @@ from typing import BinaryIO, ClassVar, Literal, assert_never
 import typer
 from typing_extensions import cast
 
-app = typer.Typer()
-
-
 Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
 
 
@@ -1104,9 +1101,10 @@ def run_git_mode(
     return "".join(out), 1
 
 
-def use_color(
-    *, color_mode: Literal["auto", "never", "always"], stdout: BinaryIO, git_mode: bool
-) -> bool:
+ColorMode = Literal["auto", "never", "always"]
+
+
+def use_color(*, color_mode: ColorMode, stdout: BinaryIO, git_mode: bool) -> bool:
     match color_mode:
         case "always":
             return True
@@ -1124,13 +1122,13 @@ class Args:
     new_path: str
     context: int = 16
     find_moves: bool = True
-    color: Literal["auto", "never", "always"] = "auto"
+    color: str = "auto"
     whitespace: bool = False
 
     def __post_init__(self) -> None:
-        self.main()
+        raise typer.Exit(self.main())
 
-    def main(self) -> None:
+    def main(self) -> int:
         assert self.context >= 0
 
         prev_data = Path(self.old_path).read_bytes()
@@ -1143,33 +1141,38 @@ class Args:
             next_name=self.new_path,
             context=self.context,
             color=use_color(
-                color_mode=self.color, stdout=sys.stdout.buffer, git_mode=False
+                color_mode=cast(ColorMode, self.color),
+                stdout=sys.stdout.buffer,
+                git_mode=False,
             ),
             ignore_whitespace=not self.whitespace,
             find_moves=self.find_moves,
         )
         if out:
             sys.stdout.write(out)
-        raise typer.Exit(1 if changed else 0)
+
+        return 1 if changed else 0
 
 
 @dataclass(frozen=True, kw_only=True)
 class StdinArgs:
-    color: Literal["auto", "never", "always"] = "auto"
+    color: str = "auto"
 
     def __post_init__(self) -> None:
-        self.main()
+        raise typer.Exit(self.main())
 
-    def main(self) -> None:
+    def main(self) -> int:
         sys.stdout.write(
             refine_unified_diff_input(
                 data=sys.stdin.buffer.read(),
                 color=use_color(
-                    color_mode=self.color, stdout=sys.stdout.buffer, git_mode=False
+                    color_mode=cast(ColorMode, self.color),
+                    stdout=sys.stdout.buffer,
+                    git_mode=False,
                 ),
             )
         )
-        raise typer.Exit(0)
+        return 0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1189,16 +1192,14 @@ class GitArgs:
     info: str | None = None
     context: int = GIT_CONTEXT
     find_moves: bool = True
-    color: Literal["auto", "never", "always"] = "auto"
+    color: str = "auto"
     whitespace: bool = False
 
     def __post_init__(self) -> None:
-        self.main()
+        raise typer.Exit(self.main())
 
-    def main(self) -> None:
-        if self.context < 0:
-            typer.echo("pdiff: --context must be >= 0", err=True)
-            raise typer.Exit(2)
+    def main(self) -> int:
+        assert self.context >= 0
         args = [
             self.path,
             self.old_file,
@@ -1216,72 +1217,21 @@ class GitArgs:
             args=args,
             context=self.context,
             color=use_color(
-                color_mode=self.color, stdout=sys.stdout.buffer, git_mode=True
+                color_mode=cast(ColorMode, self.color),
+                stdout=sys.stdout.buffer,
+                git_mode=True,
             ),
             ignore_whitespace=not self.whitespace,
             find_moves=self.find_moves,
         )
         if out:
             sys.stdout.write(out)
-        raise typer.Exit(0)
-
-
-@app.command(name="diff")
-def diff_cmd(
-    old_path: str,
-    new_path: str,
-    context: int = 16,
-    find_moves: bool = True,
-    color: str = "auto",
-    whitespace: bool = False,
-) -> None:
-    Args(
-        old_path=old_path,
-        new_path=new_path,
-        context=context,
-        find_moves=find_moves,
-        color=cast(Literal["auto", "never", "always"], color),
-        whitespace=whitespace,
-    )
-
-
-@app.command()
-def stdin(color: str = "auto") -> None:
-    StdinArgs(color=cast(Literal["auto", "never", "always"], color))
-
-
-@app.command()
-def git(
-    path: str,
-    old_file: str,
-    old_hex: str,
-    old_mode: str,
-    new_file: str,
-    new_hex: str,
-    new_mode: str,
-    new_path: str | None = None,
-    info: str | None = None,
-    context: int = GIT_CONTEXT,
-    find_moves: bool = True,
-    color: str = "auto",
-    whitespace: bool = False,
-) -> None:
-    GitArgs(
-        path=path,
-        old_file=old_file,
-        old_hex=old_hex,
-        old_mode=old_mode,
-        new_file=new_file,
-        new_hex=new_hex,
-        new_mode=new_mode,
-        new_path=new_path,
-        info=info,
-        context=context,
-        find_moves=find_moves,
-        color=cast(Literal["auto", "never", "always"], color),
-        whitespace=whitespace,
-    )
+        return 0
 
 
 if __name__ == "__main__":
+    app = typer.Typer()
+    app.command(name="diff")(Args)
+    app.command(name="stdin")(StdinArgs)
+    app.command(name="git")(GitArgs)
     app()
