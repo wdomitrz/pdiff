@@ -1,0 +1,7 @@
+class X:
+    x: int
+
+
+def a(x: int):
+    y = x + 7
+    print(y)
