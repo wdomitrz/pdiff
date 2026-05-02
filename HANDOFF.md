@@ -88,9 +88,8 @@ The user requested:
 - Replace kind `if`/`elif` checks with exhaustive `match` statements.
 - Use `case _:` with `assert_never(value_from_match)`.
 - Do not match on non-obvious expressions inline; assign the subject to a local first, then match on that local.
+- Move more functions to be methods of relevant classes
 
 Known work remaining:
 - Finish replacing leftover old kind constants/references if any remain.
-- Ensure every `match` on `Kind` handles all six literal values.
-- Fix any `assert_never(...)` subjects so they refer to the local match subject.
-- Run `make fix`, then `make check`, then `make lint`.
+- Move more functions to be methods of relevant classes
