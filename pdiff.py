@@ -9,71 +9,23 @@
 #   "typer",
 # ]
 # ///
-"""A small patdiff-like diff tool.
-
-Doctests cover the core processing and color printing behavior.
-
->>> split_lines(b"apple\\nbanana\\n")
-['apple', 'banana']
->>> [r.kind for r in diff(prev=["a", "b", "c"], next_=["a", "X", "c"])]
-[<Kind.SAME: 0>, <Kind.REPLACE: 3>, <Kind.SAME: 0>]
->>> out, changed = diff_output(prev_data=b"apple\\nbanana\\ncherry\\n", next_data=b"apple\\nBANANA\\ncherry\\n", prev_name="old.txt", next_name="new.txt", context=16, color=False, ignore_whitespace=False, find_moves=False)
->>> changed
-True
->>> print(out, end="")
------- old.txt
-++++++ new.txt
-@| @@ -1,3 +1,3 @@ ============================================================
- | apple
--| banana
-+| BANANA
- | cherry
->>> diff_output(prev_data=b"x = 1\\n", next_data=b"x  = 1\\n", prev_name="old", next_name="new", context=16, color=False, ignore_whitespace=True, find_moves=False)
-('', False)
->>> print(diff_output(prev_data=b"x = 1\\n", next_data=b"x  = 1\\n", prev_name="old", next_name="new", context=16, color=False, ignore_whitespace=False, find_moves=False)[0], end="")
------- old
-++++++ new
-@| @@ -1,1 +1,1 @@ ============================================================
-!| x  = 1
->>> "\\x1b[41m-|" in diff_output(prev_data=b"a\\n", next_data=b"b\\n", prev_name="old", next_name="new", context=16, color=True, ignore_whitespace=False, find_moves=False)[0]
-True
->>> print(refine_unified_diff_input(data=b\"\"\"--- a/x
-... +++ b/x
-... @@ -1,1 +1,1 @@
-... -old token
-... +new token
-... \"\"\", color=False), end="")
---- a/x
-+++ b/x
-@@ -1,1 +1,1 @@
--old token
-+new token
->>> ranges = detect_moves(ranges=[Range(kind=Kind.SAME, prev=["h"]), Range(kind=Kind.PREV, prev=["a", "b", "c"]), Range(kind=Kind.SAME, prev=["m"]), Range(kind=Kind.NEXT, next=["a", "b", "c"])], ignore_whitespace=False)
->>> [r.kind for r in ranges]
-[<Kind.SAME: 0>, <Kind.MOVE_FROM: 4>, <Kind.SAME: 0>, <Kind.MOVE_TO: 5>]
-"""
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUntypedFunctionDecorator=false
+"""A small patdiff-like diff tool."""
 
 from __future__ import annotations
 
 import os
 import sys
 from dataclasses import dataclass, field, replace
-from enum import Enum
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, ClassVar, Literal, assert_never
 
 import typer  # pyright: ignore[reportMissingImports]
 
 app = typer.Typer()
 
 
-class Kind(Enum):
-    SAME = 0
-    PREV = 1
-    NEXT = 2
-    REPLACE = 3
-    MOVE_FROM = 4
-    MOVE_TO = 5
+type Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -83,6 +35,56 @@ class Range:
     next: list[str] = field(default_factory=list)
     move_id: int = 0
 
+    def prev_size(self) -> int:
+        match self.kind:
+            case "same" | "prev" | "replace" | "move_from":
+                return len(self.prev)
+            case "next" | "move_to":
+                return 0
+            case _:
+                assert_never(self.kind)
+
+    def next_size(self) -> int:
+        match self.kind:
+            case "same":
+                return len(self.prev)
+            case "next" | "replace" | "move_to":
+                return len(self.next)
+            case "prev" | "move_from":
+                return 0
+            case _:
+                assert_never(self.kind)
+
+    def advance(self, *, prev_line: int, next_line: int) -> tuple[int, int]:
+        return prev_line + self.prev_size(), next_line + self.next_size()
+
+    def is_move_source_candidate(self) -> bool:
+        match self.kind:
+            case "prev":
+                return len(self.prev) >= MIN_MOVE_LINES
+            case "same" | "next" | "replace" | "move_from" | "move_to":
+                return False
+            case _:
+                assert_never(self.kind)
+
+    def is_move_target_candidate(self) -> bool:
+        match self.kind:
+            case "next":
+                return len(self.next) >= MIN_MOVE_LINES
+            case "same" | "prev" | "replace" | "move_from" | "move_to":
+                return False
+            case _:
+                assert_never(self.kind)
+
+    def move_source_key(self, *, ignore_whitespace: bool) -> str:
+        return move_key(lines=self.prev, ignore_whitespace=ignore_whitespace)
+
+    def move_target_key(self, *, ignore_whitespace: bool) -> str:
+        return move_key(lines=self.next, ignore_whitespace=ignore_whitespace)
+
+    def refine(self) -> RefinedReplace:
+        return RefinedReplace.from_lines(prev_lines=self.prev, next_lines=self.next)
+
 
 @dataclass(frozen=True, kw_only=True)
 class Hunk:
@@ -91,6 +93,21 @@ class Hunk:
     next_start: int
     next_size: int
     ranges: list[Range]
+
+    @classmethod
+    def from_ranges(
+        cls, *, ranges: list[Range], prev_start: int, next_start: int
+    ) -> Hunk:
+        return cls(
+            prev_start=prev_start,
+            prev_size=sum(r.prev_size() for r in ranges),
+            next_start=next_start,
+            next_size=sum(r.next_size() for r in ranges),
+            ranges=ranges,
+        )
+
+    def header(self) -> str:
+        return f"@@ -{self.prev_start},{self.prev_size} +{self.next_start},{self.next_size} @@{HUNK_SEPARATOR}"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -107,6 +124,98 @@ class RefinedReplace:
     prev: list[RefinedLine]
     next: list[RefinedLine]
 
+    @classmethod
+    def from_lines(cls, *, prev_lines: list[str], next_lines: list[str]) -> RefinedReplace:
+        sentinel = "\n"
+
+        def flatten(lines: list[str]) -> list[str]:
+            tokens: list[str] = []
+            for line in lines:
+                tokens.extend(tokenize(line))
+                tokens.append(sentinel)
+            return tokens
+
+        token_ranges = diff(prev=flatten(prev_lines), next_=flatten(next_lines))
+        return cls(
+            prev=cls.collapse_tokens(
+                token_ranges=token_ranges, prev_side=True, sentinel=sentinel
+            ),
+            next=cls.collapse_tokens(
+                token_ranges=token_ranges, prev_side=False, sentinel=sentinel
+            ),
+        )
+
+    @classmethod
+    def collapse_tokens(
+        cls, *, token_ranges: list[Range], prev_side: bool, sentinel: str
+    ) -> list[RefinedLine]:
+        lines: list[RefinedLine] = []
+        cur: list[Segment] = []
+
+        def emit(kind: Kind, text: str) -> None:
+            nonlocal cur
+            if text == sentinel:
+                lines.append(list(cur))
+                cur = []
+            elif cur and cur[-1].kind == kind:
+                cur[-1] = replace(cur[-1], text=cur[-1].text + text)
+            else:
+                cur.append(Segment(kind=kind, text=text))
+
+        for r in token_ranges:
+            match r.kind:
+                case "same":
+                    for tok in r.prev:
+                        emit("same", tok)
+                case "prev":
+                    if prev_side:
+                        for tok in r.prev:
+                            emit("prev", tok)
+                case "next":
+                    if not prev_side:
+                        for tok in r.next:
+                            emit("next", tok)
+                case "replace":
+                    for tok in r.prev if prev_side else r.next:
+                        emit("prev" if prev_side else "next", tok)
+                case "move_from" | "move_to":
+                    pass
+                case _:
+                    assert_never(r.kind)
+        if cur:
+            lines.append(list(cur))
+        return lines
+
+    def is_whitespace_only(self) -> bool:
+        for line in self.prev:
+            for seg in line:
+                match seg.kind:
+                    case "same":
+                        pass
+                    case "prev":
+                        if seg.text.strip():
+                            return False
+                    case "next" | "replace" | "move_from" | "move_to":
+                        pass
+                    case _:
+                        assert_never(seg.kind)
+        for line in self.next:
+            for seg in line:
+                match seg.kind:
+                    case "same":
+                        pass
+                    case "next":
+                        if seg.text.strip():
+                            return False
+                    case "prev" | "replace" | "move_from" | "move_to":
+                        pass
+                    case _:
+                        assert_never(seg.kind)
+        return True
+
+    def unified_lines(self) -> list[RefinedLine]:
+        return self.next or self.prev
+
 
 @dataclass(frozen=True, kw_only=True)
 class MoveCandidate:
@@ -118,10 +227,11 @@ HUNK_SEPARATOR = " ============================================================"
 MIN_MOVE_LINES = 3
 NULL_SHA = "."
 GIT_CONTEXT = 3
-USAGE_GIT = "usage: pdiff -git path old-file old-hex old-mode new-file new-hex new-mode [new-path] [info]"
-
-
 def diff(*, prev: list[str], next_: list[str]) -> list[Range]:
+    """
+    >>> [r.kind for r in diff(prev=["a", "b", "c"], next_=["a", "X", "c"])]
+    ['same', 'replace', 'same']
+    """
     return patience_diff(
         prev=prev, next_=next_, p0=0, p1=len(prev), n0=0, n1=len(next_)
     )
@@ -170,9 +280,9 @@ def patience_diff_middle(
     if p0 == p1 and n0 == n1:
         return []
     if p0 == p1:
-        return [Range(kind=Kind.NEXT, next=next_[n0:n1])]
+        return [Range(kind="next", next=next_[n0:n1])]
     if n0 == n1:
-        return [Range(kind=Kind.PREV, prev=prev[p0:p1])]
+        return [Range(kind="prev", prev=prev[p0:p1])]
 
     unique_prev = unique_lines(lines=prev, lo=p0, hi=p1)
     unique_next = unique_lines(lines=next_, lo=n0, hi=n1)
@@ -182,7 +292,7 @@ def patience_diff_middle(
         if line in unique_next
     )
     if not matches:
-        return [Range(kind=Kind.REPLACE, prev=prev[p0:p1], next=next_[n0:n1])]
+        return [Range(kind="replace", prev=prev[p0:p1], next=next_[n0:n1])]
 
     anchors = [matches[i] for i in lis([ni for _, ni in matches])]
     ranges: list[Range] = []
@@ -211,10 +321,14 @@ def unique_lines(*, lines: list[str], lo: int, hi: int) -> dict[str, int]:
 def append_same(*, ranges: list[Range], lines: list[str]) -> list[Range]:
     if not lines:
         return ranges
-    if ranges and ranges[-1].kind is Kind.SAME:
-        ranges[-1] = replace(ranges[-1], prev=ranges[-1].prev + lines)
-    else:
-        ranges.append(Range(kind=Kind.SAME, prev=list(lines)))
+    subject = ranges[-1].kind if ranges else None
+    match subject:
+        case "same":
+            ranges[-1] = replace(ranges[-1], prev=ranges[-1].prev + lines)
+        case None | "prev" | "next" | "replace" | "move_from" | "move_to":
+            ranges.append(Range(kind="same", prev=list(lines)))
+        case _:
+            assert_never(subject)
     return ranges
 
 
@@ -258,9 +372,9 @@ def make_hunks(*, flat_ranges: list[Range], context: int) -> list[Hunk]:
         nonlocal in_hunk, current
         tail = trailing[:context] if len(trailing) > context else trailing
         if tail:
-            current.append(Range(kind=Kind.SAME, prev=list(tail)))
+            current.append(Range(kind="same", prev=list(tail)))
         hunks.append(
-            build_hunk(
+            Hunk.from_ranges(
                 ranges=list(current),
                 prev_start=hunk_prev_start,
                 next_start=hunk_next_start,
@@ -270,99 +384,91 @@ def make_hunks(*, flat_ranges: list[Range], context: int) -> list[Hunk]:
         in_hunk = False
 
     for r in flat_ranges:
-        if r.kind is Kind.SAME:
-            n = len(r.prev)
-            if not in_hunk:
-                prefix.extend(r.prev)
-                prev_line += n
-                next_line += n
-                if len(prefix) > context:
-                    prefix = prefix[-context:]
-            else:
-                same_after.extend(r.prev)
-                prev_line += n
-                next_line += n
-                if len(same_after) > 2 * context:
-                    snap = same_after
-                    close_hunk(snap[:context])
-                    prefix = snap[-context:] if context else []
-                    same_after = []
-            continue
+        match r.kind:
+            case "same":
+                if not in_hunk:
+                    prefix.extend(r.prev)
+                    prev_line, next_line = r.advance(
+                        prev_line=prev_line, next_line=next_line
+                    )
+                    if len(prefix) > context:
+                        prefix = prefix[-context:]
+                else:
+                    same_after.extend(r.prev)
+                    prev_line, next_line = r.advance(
+                        prev_line=prev_line, next_line=next_line
+                    )
+                    if len(same_after) > 2 * context:
+                        snap = same_after
+                        close_hunk(snap[:context])
+                        prefix = snap[-context:] if context else []
+                        same_after = []
+                continue
+            case "prev" | "next" | "replace" | "move_from" | "move_to":
+                pass
+            case _:
+                assert_never(r.kind)
 
         if not in_hunk:
             hunk_prev_start = prev_line - len(prefix)
             hunk_next_start = next_line - len(prefix)
             current = []
             if prefix:
-                current.append(Range(kind=Kind.SAME, prev=list(prefix)))
+                current.append(Range(kind="same", prev=list(prefix)))
                 prefix = []
             in_hunk = True
         elif same_after:
-            current.append(Range(kind=Kind.SAME, prev=list(same_after)))
+            current.append(Range(kind="same", prev=list(same_after)))
             same_after = []
 
         current.append(r)
-        if r.kind in {Kind.PREV, Kind.MOVE_FROM}:
-            prev_line += len(r.prev)
-        elif r.kind in {Kind.NEXT, Kind.MOVE_TO}:
-            next_line += len(r.next)
-        elif r.kind is Kind.REPLACE:
-            prev_line += len(r.prev)
-            next_line += len(r.next)
+        prev_line, next_line = r.advance(prev_line=prev_line, next_line=next_line)
 
     if in_hunk:
         close_hunk(same_after)
     return hunks
 
 
-def build_hunk(*, ranges: list[Range], prev_start: int, next_start: int) -> Hunk:
-    prev_size = next_size = 0
-    for r in ranges:
-        if r.kind is Kind.SAME:
-            prev_size += len(r.prev)
-            next_size += len(r.prev)
-        elif r.kind in {Kind.PREV, Kind.MOVE_FROM}:
-            prev_size += len(r.prev)
-        elif r.kind in {Kind.NEXT, Kind.MOVE_TO}:
-            next_size += len(r.next)
-        elif r.kind is Kind.REPLACE:
-            prev_size += len(r.prev)
-            next_size += len(r.next)
-    return Hunk(
-        prev_start=prev_start,
-        prev_size=prev_size,
-        next_start=next_start,
-        next_size=next_size,
-        ranges=ranges,
-    )
-
-
 def detect_moves(*, ranges: list[Range], ignore_whitespace: bool) -> list[Range]:
+    """
+    >>> ranges = detect_moves(ranges=[Range(kind="same", prev=["h"]), Range(kind="prev", prev=["a", "b", "c"]), Range(kind="same", prev=["m"]), Range(kind="next", next=["a", "b", "c"])], ignore_whitespace=False)
+    >>> [r.kind for r in ranges]
+    ['same', 'move_from', 'same', 'move_to']
+    """
     ranges = list(ranges)
     prev_buckets: dict[str, list[MoveCandidate]] = {}
     next_buckets: dict[str, list[MoveCandidate]] = {}
     prev_line = next_line = 1
     for i, r in enumerate(ranges):
-        if r.kind is Kind.SAME:
-            prev_line += len(r.prev)
-            next_line += len(r.prev)
-        elif r.kind is Kind.PREV:
-            if len(r.prev) >= MIN_MOVE_LINES:
-                key = move_key(lines=r.prev, ignore_whitespace=ignore_whitespace)
-                prev_buckets.setdefault(key, []).append(
-                    MoveCandidate(range_index=i, start_line=prev_line)
+        match r.kind:
+            case "prev":
+                if r.is_move_source_candidate():
+                    key = r.move_source_key(ignore_whitespace=ignore_whitespace)
+                    prev_buckets.setdefault(key, []).append(
+                        MoveCandidate(range_index=i, start_line=prev_line)
+                    )
+                prev_line, next_line = r.advance(
+                    prev_line=prev_line, next_line=next_line
                 )
-            prev_line += len(r.prev)
-        elif r.kind is Kind.NEXT:
-            if len(r.next) >= MIN_MOVE_LINES:
-                key = move_key(lines=r.next, ignore_whitespace=ignore_whitespace)
-                next_buckets.setdefault(key, []).append(
-                    MoveCandidate(range_index=i, start_line=next_line)
+            case "next":
+                if r.is_move_target_candidate():
+                    key = r.move_target_key(ignore_whitespace=ignore_whitespace)
+                    next_buckets.setdefault(key, []).append(
+                        MoveCandidate(range_index=i, start_line=next_line)
+                    )
+                prev_line, next_line = r.advance(
+                    prev_line=prev_line, next_line=next_line
                 )
-            next_line += len(r.next)
-        elif r.kind is Kind.REPLACE:
-            prev_line += len(r.prev)
-            next_line += len(r.next)
+            case "same" | "replace":
+                prev_line, next_line = r.advance(
+                    prev_line=prev_line, next_line=next_line
+                )
+            case "move_from" | "move_to":
+                prev_line, next_line = r.advance(
+                    prev_line=prev_line, next_line=next_line
+                )
+            case _:
+                assert_never(r.kind)
 
     move_id = 1
     for key, prevs in prev_buckets.items():
@@ -380,22 +486,34 @@ def detect_moves(*, ranges: list[Range], ignore_whitespace: bool) -> list[Range]
             n = nexts[best]
             rp, rn = ranges[p.range_index], ranges[n.range_index]
             ranges[p.range_index] = replace(
-                rp, kind=Kind.MOVE_FROM, move_id=move_id, next=rn.next
+                rp, kind="move_from", move_id=move_id, next=rn.next
             )
             ranges[n.range_index] = replace(
-                rn, kind=Kind.MOVE_TO, move_id=move_id, prev=rp.prev
+                rn, kind="move_to", move_id=move_id, prev=rp.prev
             )
             move_id += 1
 
     unmatched_prevs, unmatched_nexts = unmatched_move_candidates(ranges=ranges)
     if len(unmatched_prevs) * len(unmatched_nexts) <= 40000:
         for p in unmatched_prevs:
-            if ranges[p.range_index].kind is not Kind.PREV:
-                continue
+            prev_kind = ranges[p.range_index].kind
+            match prev_kind:
+                case "prev":
+                    pass
+                case "same" | "next" | "replace" | "move_from" | "move_to":
+                    continue
+                case _:
+                    assert_never(prev_kind)
             best_idx, best_score = -1, 0.0
             for j, n in enumerate(unmatched_nexts):
-                if ranges[n.range_index].kind is not Kind.NEXT:
-                    continue
+                next_kind = ranges[n.range_index].kind
+                match next_kind:
+                    case "next":
+                        pass
+                    case "same" | "prev" | "replace" | "move_from" | "move_to":
+                        continue
+                    case _:
+                        assert_never(next_kind)
                 score = block_similarity(
                     prev=ranges[p.range_index].prev,
                     next_=ranges[n.range_index].next,
@@ -407,10 +525,10 @@ def detect_moves(*, ranges: list[Range], ignore_whitespace: bool) -> list[Range]
                 n = unmatched_nexts[best_idx]
                 rp, rn = ranges[p.range_index], ranges[n.range_index]
                 ranges[p.range_index] = replace(
-                    rp, kind=Kind.MOVE_FROM, move_id=move_id, next=rn.next
+                    rp, kind="move_from", move_id=move_id, next=rn.next
                 )
                 ranges[n.range_index] = replace(
-                    rn, kind=Kind.MOVE_TO, move_id=move_id, prev=rp.prev
+                    rn, kind="move_to", move_id=move_id, prev=rp.prev
                 )
                 move_id += 1
     return ranges
@@ -423,20 +541,25 @@ def unmatched_move_candidates(
     nexts: list[MoveCandidate] = []
     prev_line = next_line = 1
     for i, r in enumerate(ranges):
-        if r.kind is Kind.SAME:
-            prev_line += len(r.prev)
-            next_line += len(r.prev)
-        elif r.kind is Kind.PREV:
-            if len(r.prev) >= MIN_MOVE_LINES:
-                prevs.append(MoveCandidate(range_index=i, start_line=prev_line))
-            prev_line += len(r.prev)
-        elif r.kind is Kind.NEXT:
-            if len(r.next) >= MIN_MOVE_LINES:
-                nexts.append(MoveCandidate(range_index=i, start_line=next_line))
-            next_line += len(r.next)
-        elif r.kind in {Kind.REPLACE, Kind.MOVE_FROM, Kind.MOVE_TO}:
-            prev_line += len(r.prev)
-            next_line += len(r.next)
+        match r.kind:
+            case "prev":
+                if r.is_move_source_candidate():
+                    prevs.append(MoveCandidate(range_index=i, start_line=prev_line))
+                prev_line, next_line = r.advance(
+                    prev_line=prev_line, next_line=next_line
+                )
+            case "next":
+                if r.is_move_target_candidate():
+                    nexts.append(MoveCandidate(range_index=i, start_line=next_line))
+                prev_line, next_line = r.advance(
+                    prev_line=prev_line, next_line=next_line
+                )
+            case "same" | "replace" | "move_from" | "move_to":
+                prev_line, next_line = r.advance(
+                    prev_line=prev_line, next_line=next_line
+                )
+            case _:
+                assert_never(r.kind)
     return prevs, nexts
 
 
@@ -445,11 +568,15 @@ def block_similarity(
 ) -> float:
     prev_norm = normalize_lines(prev) if ignore_whitespace else list(prev)
     next_norm = normalize_lines(next_) if ignore_whitespace else list(next_)
-    same = sum(
-        len(r.prev)
-        for r in diff(prev=prev_norm, next_=next_norm)
-        if r.kind is Kind.SAME
-    )
+    same = 0
+    for r in diff(prev=prev_norm, next_=next_norm):
+        match r.kind:
+            case "same":
+                same += len(r.prev)
+            case "prev" | "next" | "replace" | "move_from" | "move_to":
+                pass
+            case _:
+                assert_never(r.kind)
     return same / max(len(prev), len(next_))
 
 
@@ -468,46 +595,46 @@ def render_unified_diff(
         return ""
     out = [f"------ {prev_name}\n", f"++++++ {next_name}\n"]
     for h in hunks:
-        write_line(
-            out=out,
-            kind="hunk",
-            text=f"@@ -{h.prev_start},{h.prev_size} +{h.next_start},{h.next_size} @@{HUNK_SEPARATOR}",
-            color=color,
-        )
+        write_line(out=out, kind="hunk", text=h.header(), color=color)
         for r in h.ranges:
-            if r.kind is Kind.SAME:
-                write_plain_lines(out=out, kind="same", lines=r.prev, color=color)
-            elif r.kind is Kind.PREV:
-                write_plain_lines(out=out, kind="prev", lines=r.prev, color=color)
-            elif r.kind is Kind.NEXT:
-                write_plain_lines(out=out, kind="next", lines=r.next, color=color)
-            elif r.kind is Kind.REPLACE:
-                rr = refine_replace(prev_lines=list(r.prev), next_lines=list(r.next))
-                if is_whitespace_only(rr):
-                    for line in unified_lines(rr):
-                        write_line(
-                            out=out,
-                            kind="unified",
-                            text=refined_plain(line),
-                            color=color,
+            match r.kind:
+                case "same":
+                    write_plain_lines(out=out, kind="same", lines=r.prev, color=color)
+                case "prev":
+                    write_plain_lines(out=out, kind="prev", lines=r.prev, color=color)
+                case "next":
+                    write_plain_lines(out=out, kind="next", lines=r.next, color=color)
+                case "replace":
+                    rr = r.refine()
+                    if rr.is_whitespace_only():
+                        for line in rr.unified_lines():
+                            write_line(
+                                out=out,
+                                kind="unified",
+                                text=refined_plain(line),
+                                color=color,
+                            )
+                    else:
+                        for line in rr.prev:
+                            write_refined_line(
+                                out=out, kind="prev", line=line, color=color
+                            )
+                        for line in rr.next:
+                            write_refined_line(
+                                out=out, kind="next", line=line, color=color
+                            )
+                case "move_from":
+                    for line in r.refine().prev:
+                        write_refined_line(
+                            out=out, kind="move_from", line=line, color=color
                         )
-                else:
-                    for line in rr.prev:
-                        write_refined_line(out=out, kind="prev", line=line, color=color)
-                    for line in rr.next:
-                        write_refined_line(out=out, kind="next", line=line, color=color)
-            elif r.kind is Kind.MOVE_FROM:
-                for line in refine_replace(
-                    prev_lines=list(r.prev), next_lines=list(r.next)
-                ).prev:
-                    write_refined_line(
-                        out=out, kind="move_from", line=line, color=color
-                    )
-            elif r.kind is Kind.MOVE_TO:
-                for line in refine_replace(
-                    prev_lines=list(r.prev), next_lines=list(r.next)
-                ).next:
-                    write_refined_line(out=out, kind="move_to", line=line, color=color)
+                case "move_to":
+                    for line in r.refine().next:
+                        write_refined_line(
+                            out=out, kind="move_to", line=line, color=color
+                        )
+                case _:
+                    assert_never(r.kind)
     return "".join(out)
 
 
@@ -581,86 +708,45 @@ def line_text_style(kind: str) -> str:
 
 
 def refined_segment_style(line_kind: str, seg_kind: Kind) -> str:
-    if line_kind == "prev":
-        return "90" if seg_kind is Kind.SAME else "31"
-    if line_kind == "next":
-        return "" if seg_kind is Kind.SAME else "32"
-    if line_kind == "move_from":
-        return "90" if seg_kind is Kind.SAME else "31;1"
-    if line_kind == "move_to":
-        return "33" if seg_kind is Kind.SAME else "32;1"
-    return ""
+    match line_kind:
+        case "prev":
+            match seg_kind:
+                case "same":
+                    return "90"
+                case "prev" | "next" | "replace" | "move_from" | "move_to":
+                    return "31"
+                case _:
+                    assert_never(seg_kind)
+        case "next":
+            match seg_kind:
+                case "same":
+                    return ""
+                case "prev" | "next" | "replace" | "move_from" | "move_to":
+                    return "32"
+                case _:
+                    assert_never(seg_kind)
+        case "move_from":
+            match seg_kind:
+                case "same":
+                    return "90"
+                case "prev" | "next" | "replace" | "move_from" | "move_to":
+                    return "31;1"
+                case _:
+                    assert_never(seg_kind)
+        case "move_to":
+            match seg_kind:
+                case "same":
+                    return "33"
+                case "prev" | "next" | "replace" | "move_from" | "move_to":
+                    return "32;1"
+                case _:
+                    assert_never(seg_kind)
+        case _:
+            return ""
 
 
 def ansi(style: str, s: str) -> str:
     return f"\x1b[{style}m{s}\x1b[0m"
-
-
-def refine_replace(*, prev_lines: list[str], next_lines: list[str]) -> RefinedReplace:
-    sentinel = "\n"
-
-    def flatten(lines: list[str]) -> list[str]:
-        tokens: list[str] = []
-        for line in lines:
-            tokens.extend(tokenize(line))
-            tokens.append(sentinel)
-        return tokens
-
-    token_ranges = diff(prev=flatten(prev_lines), next_=flatten(next_lines))
-    return RefinedReplace(
-        prev=collapse_tokens(
-            token_ranges=token_ranges, prev_side=True, sentinel=sentinel
-        ),
-        next=collapse_tokens(
-            token_ranges=token_ranges, prev_side=False, sentinel=sentinel
-        ),
-    )
-
-
-def collapse_tokens(
-    *, token_ranges: list[Range], prev_side: bool, sentinel: str
-) -> list[RefinedLine]:
-    lines: list[RefinedLine] = []
-    cur: list[Segment] = []
-
-    def emit(kind: Kind, text: str) -> None:
-        nonlocal cur
-        if text == sentinel:
-            lines.append(list(cur))
-            cur = []
-        elif cur and cur[-1].kind is kind:
-            cur[-1] = replace(cur[-1], text=cur[-1].text + text)
-        else:
-            cur.append(Segment(kind=kind, text=text))
-
-    for r in token_ranges:
-        if r.kind is Kind.SAME:
-            for tok in r.prev:
-                emit(Kind.SAME, tok)
-        elif r.kind is Kind.PREV and prev_side:
-            for tok in r.prev:
-                emit(Kind.PREV, tok)
-        elif r.kind is Kind.NEXT and not prev_side:
-            for tok in r.next:
-                emit(Kind.NEXT, tok)
-        elif r.kind is Kind.REPLACE:
-            for tok in r.prev if prev_side else r.next:
-                emit(Kind.PREV if prev_side else Kind.NEXT, tok)
-    if cur:
-        lines.append(list(cur))
-    return lines
-
-
-def is_whitespace_only(rr: RefinedReplace) -> bool:
-    return not any(
-        seg.kind is Kind.PREV and seg.text.strip() for line in rr.prev for seg in line
-    ) and not any(
-        seg.kind is Kind.NEXT and seg.text.strip() for line in rr.next for seg in line
-    )
-
-
-def unified_lines(rr: RefinedReplace) -> list[RefinedLine]:
-    return rr.next or rr.prev
 
 
 def refined_plain(line: RefinedLine) -> str:
@@ -722,6 +808,19 @@ def split_numeric_literal(s: str) -> list[str]:
 
 
 def refine_unified_diff_input(*, data: bytes, color: bool) -> str:
+    """
+    >>> print(refine_unified_diff_input(data=b\"\"\"--- a/x
+    ... +++ b/x
+    ... @@ -1,1 +1,1 @@
+    ... -old token
+    ... +new token
+    ... \"\"\", color=False), end="")
+    --- a/x
+    +++ b/x
+    @@ -1,1 +1,1 @@
+    -old token
+    +new token
+    """
     if not data or not data.rstrip(b"\n"):
         return ""
     lines = data.decode().rstrip("\n").split("\n")
@@ -741,7 +840,7 @@ def refine_unified_diff_input(*, data: bytes, color: bool) -> str:
             for line in del_run:
                 write_unified_plain_line(out=out, prefix="-", text=line, color=color)
         else:
-            rr = refine_replace(prev_lines=del_run, next_lines=add_run)
+            rr = RefinedReplace.from_lines(prev_lines=del_run, next_lines=add_run)
             for line in rr.prev:
                 write_unified_refined_line(out=out, prefix="-", line=line, color=color)
             for line in rr.next:
@@ -790,9 +889,23 @@ def write_unified_refined_line(
     for seg in line:
         text = seg.text
         if prefix == "-":
-            text = ansi("90" if seg.kind is Kind.SAME else "31", text)
-        elif seg.kind is not Kind.SAME:
-            text = ansi("32", text)
+            seg_kind = seg.kind
+            match seg_kind:
+                case "same":
+                    text = ansi("90", text)
+                case "prev" | "next" | "replace" | "move_from" | "move_to":
+                    text = ansi("31", text)
+                case _:
+                    assert_never(seg_kind)
+        else:
+            seg_kind = seg.kind
+            match seg_kind:
+                case "same":
+                    pass
+                case "prev" | "next" | "replace" | "move_from" | "move_to":
+                    text = ansi("32", text)
+                case _:
+                    assert_never(seg_kind)
         parts.append(text)
     out.append("".join(parts) + "\n")
 
@@ -808,6 +921,28 @@ def diff_output(
     ignore_whitespace: bool,
     find_moves: bool,
 ) -> tuple[str, bool]:
+    """
+    >>> out, changed = diff_output(prev_data=b"apple\\nbanana\\ncherry\\n", next_data=b"apple\\nBANANA\\ncherry\\n", prev_name="old.txt", next_name="new.txt", context=16, color=False, ignore_whitespace=False, find_moves=False)
+    >>> changed
+    True
+    >>> print(out, end="")
+    ------ old.txt
+    ++++++ new.txt
+    @| @@ -1,3 +1,3 @@ ============================================================
+     | apple
+    -| banana
+    +| BANANA
+     | cherry
+    >>> diff_output(prev_data=b"x = 1\\n", next_data=b"x  = 1\\n", prev_name="old", next_name="new", context=16, color=False, ignore_whitespace=True, find_moves=False)
+    ('', False)
+    >>> print(diff_output(prev_data=b"x = 1\\n", next_data=b"x  = 1\\n", prev_name="old", next_name="new", context=16, color=False, ignore_whitespace=False, find_moves=False)[0], end="")
+    ------ old
+    ++++++ new
+    @| @@ -1,1 +1,1 @@ ============================================================
+    !| x  = 1
+    >>> "\\x1b[41m-|" in diff_output(prev_data=b"a\\n", next_data=b"b\\n", prev_name="old", next_name="new", context=16, color=True, ignore_whitespace=False, find_moves=False)[0]
+    True
+    """
     if prev_data == next_data:
         return "", False
     if is_binary(prev_data) or is_binary(next_data):
@@ -850,34 +985,43 @@ def remap_ranges_to_original(
     out: list[Range] = []
     pi = ni = 0
     for r in key_ranges:
-        if r.kind is Kind.SAME:
-            n = len(r.prev)
-            out.append(Range(kind=Kind.SAME, prev=prev_orig[pi : pi + n]))
-            pi += n
-            ni += n
-        elif r.kind is Kind.PREV:
-            n = len(r.prev)
-            out.append(Range(kind=Kind.PREV, prev=prev_orig[pi : pi + n]))
-            pi += n
-        elif r.kind is Kind.NEXT:
-            n = len(r.next)
-            out.append(Range(kind=Kind.NEXT, next=next_orig[ni : ni + n]))
-            ni += n
-        elif r.kind is Kind.REPLACE:
-            pn, nn = len(r.prev), len(r.next)
-            out.append(
-                Range(
-                    kind=Kind.REPLACE,
-                    prev=prev_orig[pi : pi + pn],
-                    next=next_orig[ni : ni + nn],
+        match r.kind:
+            case "same":
+                n = len(r.prev)
+                out.append(Range(kind="same", prev=prev_orig[pi : pi + n]))
+                pi += n
+                ni += n
+            case "prev":
+                n = len(r.prev)
+                out.append(Range(kind="prev", prev=prev_orig[pi : pi + n]))
+                pi += n
+            case "next":
+                n = len(r.next)
+                out.append(Range(kind="next", next=next_orig[ni : ni + n]))
+                ni += n
+            case "replace":
+                pn, nn = len(r.prev), len(r.next)
+                out.append(
+                    Range(
+                        kind="replace",
+                        prev=prev_orig[pi : pi + pn],
+                        next=next_orig[ni : ni + nn],
+                    )
                 )
-            )
-            pi += pn
-            ni += nn
+                pi += pn
+                ni += nn
+            case "move_from" | "move_to":
+                pass
+            case _:
+                assert_never(r.kind)
     return out
 
 
 def split_lines(data: bytes) -> list[str]:
+    """
+    >>> split_lines(b"apple\\nbanana\\n")
+    ['apple', 'banana']
+    """
     if not data:
         return []
     text = data.decode().rstrip("\n")
@@ -926,7 +1070,7 @@ def run_git_mode(
     find_moves: bool,
 ) -> tuple[str, int]:
     if len(args) < 7 or len(args) > 9:
-        raise ValueError(USAGE_GIT)
+        raise ValueError(GitArgs.USAGE)
     path, old_file, old_hex, old_mode, new_file, new_hex, new_mode = args[:7]
     new_path = args[7] if len(args) >= 8 else path
     info = args[8] if len(args) >= 9 else ""
@@ -1038,6 +1182,8 @@ class StdinArgs:
 
 @dataclass(frozen=True, kw_only=True)
 class GitArgs:
+    USAGE: ClassVar[str] = "usage: pdiff git path old-file old-hex old-mode new-file new-hex new-mode [new-path] [info]"
+
     path: str
     old_file: str
     old_hex: str
