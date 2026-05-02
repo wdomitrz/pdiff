@@ -913,7 +913,6 @@ def run_git_mode(
 @dataclass(frozen=True, kw_only=True)
 class Args:
     context: int = 16
-    git: bool = False
     find_moves: bool = True
     color: str = "auto"
     whitespace: bool = False
@@ -924,27 +923,15 @@ class Args:
 
     def main(self) -> None:
         if self.context < 0:
-            typer.echo("pdiff: -context must be >= 0", err=True)
+            typer.echo("pdiff: --context must be >= 0", err=True)
             raise typer.Exit(2)
         try:
-            use_color = resolve_color(self.color, sys.stdout.buffer, self.git)
+            use_color = resolve_color(self.color, sys.stdout.buffer, False)
         except ValueError as exc:
             typer.echo(f"pdiff: {exc}", err=True)
             raise typer.Exit(2) from exc
         rest = self.paths or []
         ignore_ws = not self.whitespace
-        if self.git:
-            context = self.context
-            try:
-                out, _code = run_git_mode(
-                    rest, context, use_color, ignore_ws, self.find_moves
-                )
-            except (OSError, ValueError) as exc:
-                typer.echo(f"pdiff: {exc}", err=True)
-                raise typer.Exit(2) from exc
-            if out:
-                sys.stdout.write(out)
-            raise typer.Exit(0)
         if not rest:
             sys.stdout.write(
                 refine_unified_diff_input(sys.stdin.buffer.read(), use_color)
@@ -975,5 +962,62 @@ class Args:
         raise typer.Exit(1 if changed else 0)
 
 
+@dataclass(frozen=True, kw_only=True)
+class GitArgs:
+    path: Annotated[str, typer.Argument()]
+    old_file: Annotated[str, typer.Argument()]
+    old_hex: Annotated[str, typer.Argument()]
+    old_mode: Annotated[str, typer.Argument()]
+    new_file: Annotated[str, typer.Argument()]
+    new_hex: Annotated[str, typer.Argument()]
+    new_mode: Annotated[str, typer.Argument()]
+    new_path: Annotated[str | None, typer.Argument()] = None
+    info: Annotated[str | None, typer.Argument()] = None
+    context: int = GIT_CONTEXT
+    find_moves: bool = True
+    color: str = "auto"
+    whitespace: bool = False
+
+    def __post_init__(self) -> None:
+        self.main()
+
+    def main(self) -> None:
+        if self.context < 0:
+            typer.echo("pdiff: --context must be >= 0", err=True)
+            raise typer.Exit(2)
+        args = [
+            self.path,
+            self.old_file,
+            self.old_hex,
+            self.old_mode,
+            self.new_file,
+            self.new_hex,
+            self.new_mode,
+        ]
+        if self.new_path is not None:
+            args.append(self.new_path)
+        if self.info is not None:
+            args.append(self.info)
+        try:
+            use_color = resolve_color(self.color, sys.stdout.buffer, True)
+            out, _code = run_git_mode(
+                args,
+                self.context,
+                use_color,
+                not self.whitespace,
+                self.find_moves,
+            )
+        except (OSError, ValueError) as exc:
+            typer.echo(f"pdiff: {exc}", err=True)
+            raise typer.Exit(2) from exc
+        if out:
+            sys.stdout.write(out)
+        raise typer.Exit(0)
+
+
 if __name__ == "__main__":
-    typer.run(Args)
+    if len(sys.argv) > 1 and sys.argv[1] == "git":
+        del sys.argv[1]
+        typer.run(GitArgs)
+    else:
+        typer.run(Args)
