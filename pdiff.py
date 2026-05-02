@@ -9,8 +9,6 @@
 #   "typer",
 # ]
 # ///
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUntypedFunctionDecorator=false
-"""A small patdiff-like diff tool."""
 
 from __future__ import annotations
 
@@ -20,12 +18,12 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import BinaryIO, ClassVar, Literal, assert_never
 
-import typer  # pyright: ignore[reportMissingImports]
+import typer
 
 app = typer.Typer()
 
 
-type Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
+Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -125,7 +123,9 @@ class RefinedReplace:
     next: list[RefinedLine]
 
     @classmethod
-    def from_lines(cls, *, prev_lines: list[str], next_lines: list[str]) -> RefinedReplace:
+    def from_lines(
+        cls, *, prev_lines: list[str], next_lines: list[str]
+    ) -> RefinedReplace:
         sentinel = "\n"
 
         def flatten(lines: list[str]) -> list[str]:
@@ -227,6 +227,8 @@ HUNK_SEPARATOR = " ============================================================"
 MIN_MOVE_LINES = 3
 NULL_SHA = "."
 GIT_CONTEXT = 3
+
+
 def diff(*, prev: list[str], next_: list[str]) -> list[Range]:
     """
     >>> [r.kind for r in diff(prev=["a", "b", "c"], next_=["a", "X", "c"])]
@@ -1182,7 +1184,9 @@ class StdinArgs:
 
 @dataclass(frozen=True, kw_only=True)
 class GitArgs:
-    USAGE: ClassVar[str] = "usage: pdiff git path old-file old-hex old-mode new-file new-hex new-mode [new-path] [info]"
+    USAGE: ClassVar[str] = (
+        "usage: pdiff git path old-file old-hex old-mode new-file new-hex new-mode [new-path] [info]"
+    )
 
     path: str
     old_file: str
