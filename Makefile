@@ -1,26 +1,16 @@
-.PHONY: check fix fix_and_format format lint run_tests doctest smoke_tests
+.PHONY: all lint fix test
 
-PYTHON ?= python3
-
-check: lint run_tests
-
-fix_and_format: fix format
-
-run_tests: doctest smoke_tests
+all: fix lint test
 
 lint:
 	ruff check .
 	basedpyright --project pyproject.toml --level error .
 
-doctest:
-	$(PYTHON) -m doctest README.md $(wildcard *.py)
-
-smoke_tests:
-	$(PYTHON) test_data/smoke_tests.py
-
 fix:
 	ruff check --fix .
-
-format:
 	ruff check --select I --fix .
 	ruff format .
+
+test:
+	python3 -m doctest README.md $(wildcard *.py)
+	python3 test_data/smoke_tests.py
