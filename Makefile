@@ -1,6 +1,6 @@
 .PHONY: check fix fix_and_format format lint run_tests doctest smoke_tests
 
-PYTHON ?= python
+PYTHON ?= python3
 
 check: lint run_tests
 
