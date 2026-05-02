@@ -22,6 +22,6 @@ Tests are doctests embedded in `pdiff.py`, per request.
 ## Current Notes
 
 - Only external runtime dependency planned is `typer`.
-- CLI parsing uses frozen keyword-only dataclasses: `Args` for normal file/stdin mode and `GitArgs` for the `git` subcommand.
+- CLI parsing uses frozen keyword-only dataclasses: `Args` for file diff mode, `StdinArgs` for stdin refinement, and `GitArgs` for git external-diff mode.
 - Data processing is kept separate from printing: core functions return strings/booleans, `Args.main()` handles I/O and exit codes.
-- CLI is intentionally Python/Typer-style now: use long options such as `--color always`, `--context 3`, `--whitespace`, and `--no-find-moves`. Git external-diff mode is `pdiff.py git ...`, not `--git`.
+- CLI is intentionally Python/Typer-style now with explicit subcommands: `pdiff.py diff ...`, `pdiff.py stdin ...`, and `pdiff.py git ...`.

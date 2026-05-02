@@ -1,0 +1,5 @@
+--- a/sample.txt
++++ b/sample.txt
+@@ -1,1 +1,1 @@
+-banana split
++banana split now
