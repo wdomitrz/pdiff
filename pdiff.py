@@ -1255,10 +1255,7 @@ class GitExternalDiff:
     def read_side(cls, *, sha: str, path: str) -> bytes:
         if sha == cls.NULL_SHA:
             return b""
-        try:
-            return Path(path).read_bytes()
-        except OSError as exc:
-            raise OSError(f"read {path}: {exc}") from exc
+        return Path(path).read_bytes()
 
 
 class Color:
