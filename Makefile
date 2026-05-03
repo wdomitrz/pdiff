@@ -7,8 +7,7 @@ lint:
 	basedpyright --project pyproject.toml --level error .
 
 fix:
-	ruff check --fix .
-	ruff check --select I --fix .
+	ruff check --extend-select I --fix-only --fix .
 	ruff format .
 
 test:

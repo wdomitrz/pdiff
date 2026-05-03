@@ -16,10 +16,9 @@ import os
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import BinaryIO, ClassVar, Literal, assert_never
+from typing import BinaryIO, ClassVar, Literal, assert_never, cast
 
 import typer
-from typing_extensions import cast
 
 Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
 

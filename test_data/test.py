@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 ################################################################
 # Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
 # AGPL License
@@ -23,8 +22,7 @@ def run(
         [PYTHON, str(PDIFF), *args],
         cwd=ROOT,
         input=input_data,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
 
