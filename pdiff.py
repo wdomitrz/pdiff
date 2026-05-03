@@ -1388,6 +1388,378 @@ class GitArgs:
         return 0
 
 
+class Test:
+    r"""
+    >>> import tempfile
+    >>> tmp_dir = tempfile.TemporaryDirectory(prefix="pdiff-test-")
+    >>> test = Test(Path(tmp_dir.name))
+
+    >>> _ = test.assert_diff(
+    ...     "simple",
+    ...     '''
+    ...     apple
+    ...     banana
+    ...     cherry
+    ...     ''',
+    ...     '''
+    ...     apple
+    ...     BANANA
+    ...     cherry
+    ...     ''',
+    ...     b'''------ simple/old.txt
+    ... ++++++ simple/new.txt
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,3 +1,3 @@ ============================================================\x1b[0m
+    ... \x1b[100m |\x1b[0m apple
+    ... \x1b[41m-|\x1b[0m \x1b[31mbanana\x1b[0m
+    ... \x1b[42m+|\x1b[0m \x1b[32mBANANA\x1b[0m
+    ... \x1b[100m |\x1b[0m cherry
+    ... ''',
+    ... )
+
+    >>> _ = test.assert_diff(
+    ...     "whitespace",
+    ...     '''
+    ...     x = 1
+    ...     ''',
+    ...     '''
+    ...     x  = 1
+    ...     ''',
+    ...     b'',
+    ...     expected_code=0,
+    ... )
+
+    >>> _ = test.assert_diff(
+    ...     "whitespace",
+    ...     '''
+    ...     x = 1
+    ...     ''',
+    ...     '''
+    ...     x  = 1
+    ...     ''',
+    ...     b'''------ whitespace/old.txt
+    ... ++++++ whitespace/new.txt
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,1 +1,1 @@ ============================================================\x1b[0m
+    ... \x1b[43m!|\x1b[0m x  = 1
+    ... ''',
+    ...     args=["--whitespace"],
+    ... )
+
+    >>> _ = test.assert_diff(
+    ...     "move",
+    ...     '''
+    ...     alpha
+    ...     moved-one
+    ...     moved-two-old
+    ...     moved-three
+    ...     beta-1
+    ...     beta-2
+    ...     beta-3
+    ...     beta-4
+    ...     beta-5
+    ...     gamma
+    ...     ''',
+    ...     '''
+    ...     alpha
+    ...     beta-1
+    ...     beta-2
+    ...     beta-3
+    ...     beta-4
+    ...     beta-5
+    ...     moved-one
+    ...     moved-two-new
+    ...     moved-three
+    ...     gamma
+    ...     ''',
+    ...     b'''------ move/old.txt
+    ... ++++++ move/new.txt
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,10 +1,10 @@ ============================================================\x1b[0m
+    ... \x1b[100m |\x1b[0m alpha
+    ... \x1b[45m<|\x1b[0m \x1b[90mmoved-one\x1b[0m
+    ... \x1b[45m<|\x1b[0m \x1b[90mmoved-two-\x1b[0m\x1b[31;1mold\x1b[0m
+    ... \x1b[45m<|\x1b[0m \x1b[90mmoved-three\x1b[0m
+    ... \x1b[100m |\x1b[0m beta-1
+    ... \x1b[100m |\x1b[0m beta-2
+    ... \x1b[100m |\x1b[0m beta-3
+    ... \x1b[100m |\x1b[0m beta-4
+    ... \x1b[100m |\x1b[0m beta-5
+    ... \x1b[46m>|\x1b[0m \x1b[33mmoved-one\x1b[0m
+    ... \x1b[46m>|\x1b[0m \x1b[33mmoved-two-\x1b[0m\x1b[32;1mnew\x1b[0m
+    ... \x1b[46m>|\x1b[0m \x1b[33mmoved-three\x1b[0m
+    ... \x1b[100m |\x1b[0m gamma
+    ... ''',
+    ... )
+
+    >>> _ = test.assert_diff(
+    ...     "indent",
+    ...     '''
+    ...     class X:
+    ...         x: int
+    ...
+    ...
+    ...     def a(x: int):
+    ...         y = x + 7
+    ...         print(y)
+    ...     ''',
+    ...     '''
+    ...     class X:
+    ...         x: int
+    ...
+    ...         def a(self):
+    ...             y = self.x + 7
+    ...             print(y)
+    ...     ''',
+    ...     b'''------ indent/old.txt
+    ... ++++++ indent/new.txt
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,7 +1,6 @@ ============================================================\x1b[0m
+    ... \x1b[100m |\x1b[0m class X:
+    ... \x1b[100m |\x1b[0m     x: int
+    ... \x1b[100m |\x1b[0m
+    ... \x1b[41m-|\x1b[0m
+    ... \x1b[41m-|\x1b[0m \x1b[90mdef a(\x1b[0m\x1b[31mx: int\x1b[0m\x1b[90m):\x1b[0m
+    ... \x1b[41m-|\x1b[0m \x1b[31m    \x1b[0m\x1b[90my = x + 7\x1b[0m
+    ... \x1b[42m+|\x1b[0m \x1b[32m    \x1b[0mdef a(\x1b[32mself\x1b[0m):
+    ... \x1b[42m+|\x1b[0m \x1b[32m        \x1b[0my = \x1b[32mself.\x1b[0mx + 7
+    ... \x1b[100m |\x1b[0m         print(y)
+    ... ''',
+    ... )
+
+    >>> _ = test.assert_diff(
+    ...     "indent_move",
+    ...     '''
+    ...     class X:
+    ...         x: int
+    ...
+    ...     def b(asdf):
+    ...         print(asdf)
+    ...
+    ...     def c():
+    ...         b(7)
+    ...         b("asdf")
+    ...         b("zxcv")
+    ...
+    ...     def a(self: X) -> None:
+    ...         y = self.x + 7
+    ...         z = self.x + 5 * y
+    ...         print(y, z)
+    ...     ''',
+    ...     '''
+    ...     class X:
+    ...         x: int
+    ...
+    ...         def a(self) -> None:
+    ...             y = self.x + 7
+    ...             z = self.x + 5 * y
+    ...             print(y, z)
+    ...
+    ...     def b(asdf):
+    ...         print(asdf)
+    ...
+    ...     def c():
+    ...         b(7)
+    ...         b("asdf")
+    ...         b("zxcv")
+    ...     ''',
+    ...     b'''------ indent_move/old.txt
+    ... ++++++ indent_move/new.txt
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,15 +1,15 @@ ============================================================\x1b[0m
+    ... \x1b[100m |\x1b[0m class X:
+    ... \x1b[100m |\x1b[0m     x: int
+    ... \x1b[100m |\x1b[0m
+    ... \x1b[46m>|\x1b[0m \x1b[32;1m    \x1b[0m\x1b[33mdef a(self) -> None:\x1b[0m
+    ... \x1b[46m>|\x1b[0m \x1b[32;1m        \x1b[0m\x1b[33my = self.x + 7\x1b[0m
+    ... \x1b[46m>|\x1b[0m \x1b[32;1m        \x1b[0m\x1b[33mz = self.x + 5 * y\x1b[0m
+    ... \x1b[46m>|\x1b[0m \x1b[32;1m        \x1b[0m\x1b[33mprint(y, z)\x1b[0m
+    ... \x1b[46m>|\x1b[0m
+    ... \x1b[100m |\x1b[0m def b(asdf):
+    ... \x1b[100m |\x1b[0m     print(asdf)
+    ... \x1b[100m |\x1b[0m
+    ... \x1b[100m |\x1b[0m def c():
+    ... \x1b[100m |\x1b[0m     b(7)
+    ... \x1b[100m |\x1b[0m     b("asdf")
+    ... \x1b[100m |\x1b[0m     b("zxcv")
+    ... \x1b[45m<|\x1b[0m
+    ... \x1b[45m<|\x1b[0m \x1b[90mdef a(self\x1b[0m\x1b[31;1m: X\x1b[0m\x1b[90m) -> None:\x1b[0m
+    ... \x1b[45m<|\x1b[0m \x1b[31;1m    \x1b[0m\x1b[90my = self.x + 7\x1b[0m
+    ... \x1b[45m<|\x1b[0m \x1b[31;1m    \x1b[0m\x1b[90mz = self.x + 5 * y\x1b[0m
+    ... \x1b[45m<|\x1b[0m \x1b[31;1m    \x1b[0m\x1b[90mprint(y, z)\x1b[0m
+    ... ''',
+    ... )
+
+    >>> for path, content in {
+    ...     "directory/old/removed.txt": '''
+    ...     removed
+    ...     ''',
+    ...     "directory/old/changed.txt": '''
+    ...     old value
+    ...     ''',
+    ...     "directory/old/same.txt": '''
+    ...     same
+    ...     ''',
+    ...     "directory/old/subdir/nested.txt": '''
+    ...     old nested
+    ...     ''',
+    ...     "directory/old/typeflip/file.txt": '''
+    ...     inside old dir
+    ...     ''',
+    ...     "directory/new/added.txt": '''
+    ...     added
+    ...     ''',
+    ...     "directory/new/changed.txt": '''
+    ...     new value
+    ...     ''',
+    ...     "directory/new/same.txt": '''
+    ...     same
+    ...     ''',
+    ...     "directory/new/subdir/nested.txt": '''
+    ...     new nested
+    ...     ''',
+    ...     "directory/new/typeflip": '''
+    ...     new plain file
+    ...     ''',
+    ... }.items():
+    ...     test.write_file(test.tmp / path, content)
+    >>> _ = test.assert_run(
+    ...     ["diff", "--color", "always", str(test.tmp / "directory" / "old"), str(test.tmp / "directory" / "new")],
+    ...     expected_code=1,
+    ...     expected_stdout=b'''Only in directory/old: removed.txt
+    ... ------ directory/old/removed.txt
+    ... ++++++ /dev/null
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,1 +1,0 @@ ============================================================\x1b[0m
+    ... \x1b[41m-|\x1b[0m \x1b[31mremoved\x1b[0m
+    ... Only in directory/new: added.txt
+    ... ------ /dev/null
+    ... ++++++ directory/new/added.txt
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,0 +1,1 @@ ============================================================\x1b[0m
+    ... \x1b[42m+|\x1b[0m \x1b[32madded\x1b[0m
+    ... ------ directory/old/changed.txt
+    ... ++++++ directory/new/changed.txt
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,1 +1,1 @@ ============================================================\x1b[0m
+    ... \x1b[41m-|\x1b[0m \x1b[31mold\x1b[0m\x1b[90m value\x1b[0m
+    ... \x1b[42m+|\x1b[0m \x1b[32mnew\x1b[0m value
+    ... ------ directory/old/subdir/nested.txt
+    ... ++++++ directory/new/subdir/nested.txt
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,1 +1,1 @@ ============================================================\x1b[0m
+    ... \x1b[41m-|\x1b[0m \x1b[31mold\x1b[0m\x1b[90m nested\x1b[0m
+    ... \x1b[42m+|\x1b[0m \x1b[32mnew\x1b[0m nested
+    ... Files directory/old/typeflip and directory/new/typeflip are not the same type
+    ... ''',
+    ... )
+
+    >>> _ = test.assert_run(
+    ...     ["stdin", "--color", "always"],
+    ...     expected_code=0,
+    ...     input_data=Test.input_text('''
+    ...     --- a/sample.txt
+    ...     +++ b/sample.txt
+    ...     @@ -1,1 +1,1 @@
+    ...     -banana split
+    ...     +banana split now
+    ...     '''),
+    ...     expected_stdout=b'''--- a/sample.txt
+    ... +++ b/sample.txt
+    ... \x1b[1m@@ -1,1 +1,1 @@\x1b[0m
+    ... \x1b[31m-\x1b[0m\x1b[90mbanana split\x1b[0m
+    ... \x1b[32m+\x1b[0mbanana split\x1b[32m now\x1b[0m
+    ... ''',
+    ... )
+
+    >>> old_path = test.tmp / "git" / "old.txt"
+    >>> new_path = test.tmp / "git" / "new.txt"
+    >>> test.write_file(old_path, '''
+    ... apple
+    ... banana
+    ... cherry
+    ... ''')
+    >>> test.write_file(new_path, '''
+    ... apple
+    ... BANANA
+    ... cherry
+    ... ''')
+    >>> _ = test.assert_run(
+    ...     ["git", "--color", "always", "file.txt", str(old_path), "aaa111", "100644", str(new_path), "bbb222", "100644"],
+    ...     expected_code=0,
+    ...     expected_stdout=b'''\x1b[1mpdiff -git a/file.txt b/file.txt\x1b[0m
+    ... index aaa111..bbb222
+    ... ------ a/file.txt
+    ... ++++++ b/file.txt
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,3 +1,3 @@ ============================================================\x1b[0m
+    ... \x1b[100m |\x1b[0m apple
+    ... \x1b[41m-|\x1b[0m \x1b[31mbanana\x1b[0m
+    ... \x1b[42m+|\x1b[0m \x1b[32mBANANA\x1b[0m
+    ... \x1b[100m |\x1b[0m cherry
+    ... ''',
+    ... )
+
+    >>> tmp_dir.cleanup()
+    """
+
+    PDIFF: ClassVar[Path] = Path(__file__).resolve()
+
+    def __init__(self, tmp: Path) -> None:
+        self.tmp = tmp
+
+    @staticmethod
+    def input_text(value: str) -> bytes:
+        from textwrap import dedent  # noqa: PLC0415
+
+        return dedent(value.removeprefix(chr(10))).encode()
+
+    @classmethod
+    def write_file(cls, path: Path, data: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(cls.input_text(data))
+
+    def assert_run(
+        self,
+        args: list[str],
+        *,
+        expected_code: int,
+        expected_stdout: bytes | None = None,
+        input_data: bytes | None = None,
+    ) -> bytes:
+        import subprocess  # noqa: PLC0415
+
+        result = subprocess.run(
+            [sys.executable, str(self.PDIFF), *args],
+            cwd=self.tmp,
+            input=input_data,
+            capture_output=True,
+            check=False,
+        )
+        stdout = result.stdout.replace(f"{self.tmp}/".encode(), b"")
+        assert result.returncode == expected_code
+        assert expected_stdout is None or stdout == expected_stdout
+        assert not result.stderr
+        return stdout
+
+    def assert_diff(
+        self,
+        name: str,
+        old: str,
+        new: str,
+        expected: bytes,
+        *,
+        args: list[str] | None = None,
+        expected_code: int = 1,
+    ) -> bytes:
+        old_path = self.tmp / name / "old.txt"
+        new_path = self.tmp / name / "new.txt"
+        self.write_file(old_path, old)
+        self.write_file(new_path, new)
+        return self.assert_run(
+            [
+                "diff",
+                "--color",
+                "always",
+                *(args or []),
+                str(old_path),
+                str(new_path),
+            ],
+            expected_code=expected_code,
+            expected_stdout=expected,
+        )
+
+
 if __name__ == "__main__":
     app = typer.Typer()
     app.command(name="diff")(Args)

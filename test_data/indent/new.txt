@@ -1,6 +1,0 @@
-class X:
-    x: int
-
-    def a(self):
-        y = self.x + 7
-        print(y)

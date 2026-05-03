@@ -1,7 +1,0 @@
------- test_data/simple/old.txt
-++++++ test_data/simple/new.txt
-[100m@|[0m [1m@@ -1,3 +1,3 @@ ============================================================[0m
-[100m |[0m apple
-[41m-|[0m [31mbanana[0m
-[42m+|[0m [32mBANANA[0m
-[100m |[0m cherry
