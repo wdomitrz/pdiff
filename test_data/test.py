@@ -56,87 +56,52 @@ def assert_run(
     return result.stdout
 
 
-def main() -> None:
-    assert_run(
-        [
-            "diff",
-            "--color",
-            "never",
-            "test_data/simple_old.txt",
-            "test_data/simple_new.txt",
-        ],
-        expected_code=1,
-        expected_stdout=(DATA / "simple_expected.txt").read_bytes(),
-    )
-    color_stdout = assert_run(
+def assert_diff_case(
+    name: str,
+    *,
+    args: list[str] | None = None,
+    expected_code: int = 1,
+    expected_stdout: bytes | None = None,
+) -> bytes:
+    case_dir = DATA / name
+    return assert_run(
         [
             "diff",
             "--color",
             "always",
-            "test_data/simple_old.txt",
-            "test_data/simple_new.txt",
+            *(args or []),
+            str(case_dir.relative_to(ROOT) / "old.txt"),
+            str(case_dir.relative_to(ROOT) / "new.txt"),
         ],
-        expected_code=1,
+        expected_code=expected_code,
+        expected_stdout=(
+            (case_dir / "expected.txt").read_bytes()
+            if expected_stdout is None
+            else expected_stdout
+        ),
     )
-    if b"\x1b[41m-|" not in color_stdout:
+
+
+def main() -> None:
+    simple_stdout = assert_diff_case("simple")
+    if b"\x1b[41m-|\x1b[0m" not in simple_stdout:
         raise AssertionError("colored diff output is missing red deletion marker")
 
-    assert_run(
-        [
-            "diff",
-            "--color",
-            "never",
-            "test_data/whitespace_old.txt",
-            "test_data/whitespace_new.txt",
-        ],
-        expected_code=0,
-        expected_stdout=b"",
-    )
-    assert_run(
-        [
-            "diff",
-            "--color",
-            "never",
-            "--whitespace",
-            "test_data/whitespace_old.txt",
-            "test_data/whitespace_new.txt",
-        ],
-        expected_code=1,
-        expected_stdout=(DATA / "whitespace_expected.txt").read_bytes(),
-    )
+    assert_diff_case("whitespace", expected_code=0, expected_stdout=b"")
+    assert_diff_case("whitespace", args=["--whitespace"])
 
-    assert_run(
-        [
-            "diff",
-            "--color",
-            "never",
-            "test_data/move_old.txt",
-            "test_data/move_new.txt",
-        ],
-        expected_code=1,
-        expected_stdout=(DATA / "move_expected.txt").read_bytes(),
-    )
+    assert_diff_case("move")
 
-    indent_stdout = assert_run(
-        [
-            "diff",
-            "--color",
-            "never",
-            "test_data/indent_old.txt",
-            "test_data/indent_new.txt",
-        ],
-        expected_code=1,
-        expected_stdout=(DATA / "indent_expected.txt").read_bytes(),
-    )
-    if b" |         print(y)\n" not in indent_stdout:
+    indent_stdout = assert_diff_case("indent")
+    if b"\x1b[100m |\x1b[0m         print(y)\n" not in indent_stdout:
         raise AssertionError("indent diff context should render from the new file")
-    if b" |     print(y)\n" in indent_stdout:
+    if b"\x1b[100m |\x1b[0m     print(y)\n" in indent_stdout:
         raise AssertionError("indent diff context rendered old-file indentation")
 
     stdin_color = assert_run(
         ["stdin", "--color", "always"],
         expected_code=0,
-        input_data=(DATA / "stdin_unified.diff").read_bytes(),
+        input_data=(DATA / "stdin" / "input.diff").read_bytes(),
     )
     if b"\x1b[" not in stdin_color or b"banana" not in stdin_color:
         raise AssertionError("stdin refined color output is missing expected ANSI/text")
@@ -145,17 +110,17 @@ def main() -> None:
         [
             "git",
             "--color",
-            "never",
+            "always",
             "file.txt",
-            "test_data/simple_old.txt",
+            "test_data/simple/old.txt",
             "aaa111",
             "100644",
-            "test_data/simple_new.txt",
+            "test_data/simple/new.txt",
             "bbb222",
             "100644",
         ],
         expected_code=0,
-        expected_stdout=(DATA / "git_expected.txt").read_bytes(),
+        expected_stdout=(DATA / "git" / "expected.txt").read_bytes(),
     )
 
 

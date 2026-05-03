@@ -69,15 +69,10 @@ Makefile targets:
 - `test_data/test.py`
 
 Checked-in smoke fixtures live under `test_data/`:
-- `simple_old.txt`
-- `simple_new.txt`
-- `simple_expected.txt`
-- `whitespace_old.txt`
-- `whitespace_new.txt`
-- `whitespace_expected.txt`
-- `stdin_unified.diff`
-- `git_expected.txt`
-- `test.py`
+- file-diff fixtures use `test_data/<name>/old.txt`, `new.txt`, and `expected.txt`
+- stdin fixture uses `test_data/stdin/input.diff`
+- git fixture uses `test_data/git/expected.txt`
+- test runner is `test_data/test.py`
 
 ## Current Refactor Notes
 

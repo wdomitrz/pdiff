@@ -1,0 +1,16 @@
+------ test_data/move/old.txt
+++++++ test_data/move/new.txt
+[100m@|[0m [1m@@ -1,10 +1,10 @@ ============================================================[0m
+[100m |[0m alpha
+[45m<|[0m [90mmoved-one[0m
+[45m<|[0m [90mmoved-two-[0m[31;1mold[0m
+[45m<|[0m [90mmoved-three[0m
+[100m |[0m beta-1
+[100m |[0m beta-2
+[100m |[0m beta-3
+[100m |[0m beta-4
+[100m |[0m beta-5
+[46m>|[0m [33mmoved-one[0m
+[46m>|[0m [33mmoved-two-[0m[32;1mnew[0m
+[46m>|[0m [33mmoved-three[0m
+[100m |[0m gamma
