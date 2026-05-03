@@ -3,24 +3,22 @@
 # Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
 # AGPL License
 ################################################################
-#
-# /// script
-# dependencies = [
-#   "typer",
-# ]
-# ///
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Annotated, BinaryIO, ClassVar, Literal, assert_never, cast
-
-import typer
+from typing import BinaryIO, ClassVar, Literal, Protocol, assert_never, cast
 
 Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
+Command = Literal["diff", "stdin", "git"]
+
+
+class Subparsers(Protocol):
+    def add_parser(self, name: str) -> argparse.ArgumentParser: ...
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1209,14 +1207,14 @@ class GitExternalDiff:
     DEFAULT_CONTEXT: ClassVar[int] = 3
     NULL_SHA: ClassVar[str] = "."
 
-    path: str
+    path: Path
     old_file: Path
     old_hex: str
     old_mode: str
     new_file: Path
     new_hex: str
     new_mode: str
-    new_path: str | None
+    new_path: Path | None
     info: str | None
     context: int
     color: bool
@@ -1224,8 +1222,9 @@ class GitExternalDiff:
     find_moves: bool
 
     def run(self) -> tuple[str, int]:
-        new_path = self.new_path if self.new_path is not None else self.path
-        prev_name, next_name = "a/" + self.path, "b/" + new_path
+        path = str(self.path)
+        new_path = str(self.new_path) if self.new_path is not None else path
+        prev_name, next_name = "a/" + path, "b/" + new_path
         is_new_file = self.old_hex == self.NULL_SHA
         is_deleted_file = self.new_hex == self.NULL_SHA
         diff_out, diff_changed = FileDiff(
@@ -1268,6 +1267,7 @@ class GitExternalDiff:
 
 class Color:
     Mode = Literal["auto", "never", "always"]
+    CHOICES: ClassVar[tuple[Mode, ...]] = ("auto", "never", "always")
 
     @staticmethod
     def use(*, color_mode: Mode, stdout: BinaryIO, git_mode: bool) -> bool:
@@ -1295,11 +1295,37 @@ class Args:
     new_path: Path
     context: int = 16
     find_moves: bool = True
-    color: str = "auto"
+    color: Color.Mode = "auto"
     whitespace: bool = False
 
-    def __post_init__(self) -> None:
-        raise typer.Exit(self.main())
+    @classmethod
+    def add_parser(cls, subparsers: Subparsers) -> None:
+        parser = subparsers.add_parser("diff")
+        parser.add_argument("--context", type=int, default=16)
+        parser.add_argument(
+            "--find-moves",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+        )
+        parser.add_argument("--color", choices=Color.CHOICES, default="auto")
+        parser.add_argument(
+            "--whitespace",
+            action=argparse.BooleanOptionalAction,
+            default=False,
+        )
+        parser.add_argument("old_path", type=Path)
+        parser.add_argument("new_path", type=Path)
+
+    @classmethod
+    def from_namespace(cls, namespace: argparse.Namespace) -> Args:
+        return cls(
+            old_path=cast(Path, namespace.old_path),
+            new_path=cast(Path, namespace.new_path),
+            context=cast(int, namespace.context),
+            find_moves=cast(bool, namespace.find_moves),
+            color=cast(Color.Mode, namespace.color),
+            whitespace=cast(bool, namespace.whitespace),
+        )
 
     def main(self) -> int:
         assert self.context >= 0
@@ -1309,7 +1335,7 @@ class Args:
             next_path=self.new_path,
             context=self.context,
             color=Color.use(
-                color_mode=cast(Color.Mode, self.color),
+                color_mode=self.color,
                 stdout=sys.stdout.buffer,
                 git_mode=False,
             ),
@@ -1324,17 +1350,23 @@ class Args:
 
 @dataclass(frozen=True, kw_only=True)
 class StdinArgs:
-    color: str = "auto"
+    color: Color.Mode = "auto"
 
-    def __post_init__(self) -> None:
-        raise typer.Exit(self.main())
+    @classmethod
+    def add_parser(cls, subparsers: Subparsers) -> None:
+        parser = subparsers.add_parser("stdin")
+        parser.add_argument("--color", choices=Color.CHOICES, default="auto")
+
+    @classmethod
+    def from_namespace(cls, namespace: argparse.Namespace) -> StdinArgs:
+        return cls(color=cast(Color.Mode, namespace.color))
 
     def main(self) -> int:
         sys.stdout.write(
             StdinDiffRefiner(
                 data=sys.stdin.buffer.read(),
                 color=Color.use(
-                    color_mode=cast(Color.Mode, self.color),
+                    color_mode=self.color,
                     stdout=sys.stdout.buffer,
                     git_mode=False,
                 ),
@@ -1345,22 +1377,64 @@ class StdinArgs:
 
 @dataclass(frozen=True, kw_only=True)
 class GitArgs:
-    path: str
+    path: Path
     old_file: Path
     old_hex: str
     old_mode: str
     new_file: Path
     new_hex: str
     new_mode: str
-    new_path: Annotated[str | None, typer.Argument()] = None
-    info: Annotated[str | None, typer.Argument()] = None
+    new_path: Path | None = None
+    info: str | None = None
     context: int = GitExternalDiff.DEFAULT_CONTEXT
     find_moves: bool = True
-    color: str = "auto"
+    color: Color.Mode = "auto"
     whitespace: bool = False
 
-    def __post_init__(self) -> None:
-        raise typer.Exit(self.main())
+    @classmethod
+    def add_parser(cls, subparsers: Subparsers) -> None:
+        parser = subparsers.add_parser("git")
+        parser.add_argument(
+            "--context", type=int, default=GitExternalDiff.DEFAULT_CONTEXT
+        )
+        parser.add_argument(
+            "--find-moves",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+        )
+        parser.add_argument("--color", choices=Color.CHOICES, default="auto")
+        parser.add_argument(
+            "--whitespace",
+            action=argparse.BooleanOptionalAction,
+            default=False,
+        )
+        parser.add_argument("path", type=Path)
+        parser.add_argument("old_file", type=Path)
+        parser.add_argument("old_hex")
+        parser.add_argument("old_mode")
+        parser.add_argument("new_file", type=Path)
+        parser.add_argument("new_hex")
+        parser.add_argument("new_mode")
+        parser.add_argument("new_path", nargs="?", type=Path)
+        parser.add_argument("info", nargs="?")
+
+    @classmethod
+    def from_namespace(cls, namespace: argparse.Namespace) -> GitArgs:
+        return cls(
+            path=cast(Path, namespace.path),
+            old_file=cast(Path, namespace.old_file),
+            old_hex=cast(str, namespace.old_hex),
+            old_mode=cast(str, namespace.old_mode),
+            new_file=cast(Path, namespace.new_file),
+            new_hex=cast(str, namespace.new_hex),
+            new_mode=cast(str, namespace.new_mode),
+            new_path=cast(Path | None, namespace.new_path),
+            info=cast(str | None, namespace.info),
+            context=cast(int, namespace.context),
+            find_moves=cast(bool, namespace.find_moves),
+            color=cast(Color.Mode, namespace.color),
+            whitespace=cast(bool, namespace.whitespace),
+        )
 
     def main(self) -> int:
         assert self.context >= 0
@@ -1376,7 +1450,7 @@ class GitArgs:
             info=self.info,
             context=self.context,
             color=Color.use(
-                color_mode=cast(Color.Mode, self.color),
+                color_mode=self.color,
                 stdout=sys.stdout.buffer,
                 git_mode=True,
             ),
@@ -1386,6 +1460,31 @@ class GitArgs:
         if out:
             sys.stdout.write(out)
         return 0
+
+
+CLIArgs = Args | StdinArgs | GitArgs
+
+
+class CLI:
+    @classmethod
+    def from_argv(cls, argv: list[str] | None = None) -> CLIArgs:
+        parser = argparse.ArgumentParser(description="Pretty diff tool.")
+        subparsers = parser.add_subparsers(dest="command", required=True)
+        Args.add_parser(subparsers)
+        StdinArgs.add_parser(subparsers)
+        GitArgs.add_parser(subparsers)
+
+        namespace = parser.parse_args(argv)
+        command = cast(Command, namespace.command)
+        match command:
+            case "diff":
+                return Args.from_namespace(namespace)
+            case "stdin":
+                return StdinArgs.from_namespace(namespace)
+            case "git":
+                return GitArgs.from_namespace(namespace)
+            case _:
+                assert_never(command)
 
 
 class Test:
@@ -1792,8 +1891,4 @@ class Test:
 
 
 if __name__ == "__main__":
-    app = typer.Typer()
-    app.command(name="diff")(Args)
-    app.command(name="stdin")(StdinArgs)
-    app.command(name="git")(GitArgs)
-    app()
+    raise SystemExit(CLI.from_argv().main())
