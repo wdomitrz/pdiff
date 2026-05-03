@@ -520,7 +520,7 @@ class MoveDetector:
                             assert_never(next_kind)
                     score = self.block_similarity(
                         prev=ranges[p.range_index].prev,
-                        next=ranges[n.range_index].next,
+                        next_=ranges[n.range_index].next,
                     )
                     if score >= 0.5 and score > best_score:
                         best_idx, best_score = j, score
@@ -565,9 +565,11 @@ class MoveDetector:
                     assert_never(r.kind)
         return prevs, nexts
 
-    def block_similarity(self, *, prev: list[str], next: list[str]) -> float:
+    def block_similarity(self, *, prev: list[str], next_: list[str]) -> float:
         prev_norm = Text.normalize_lines(prev) if self.ignore_whitespace else list(prev)
-        next_norm = Text.normalize_lines(next) if self.ignore_whitespace else list(next)
+        next_norm = (
+            Text.normalize_lines(next_) if self.ignore_whitespace else list(next_)
+        )
         same = 0
         for r in LineDiff(prev=prev_norm, next=next_norm).ranges():
             match r.kind:
@@ -577,7 +579,7 @@ class MoveDetector:
                     pass
                 case _:
                     assert_never(r.kind)
-        return same / max(len(prev), len(next))
+        return same / max(len(prev), len(next_))
 
 
 class Text:
