@@ -1762,6 +1762,26 @@ class Test:
     ... ''',
     ... )
 
+    >>> git_named_path = test.tmp / "git"
+    >>> git_named_next_path = test.tmp / "git.next"
+    >>> test.write_file(git_named_path, '''
+    ... old
+    ... ''')
+    >>> test.write_file(git_named_next_path, '''
+    ... new
+    ... ''')
+    >>> _ = test.assert_run(
+    ...     ["diff", "--color", "always", "--", "git", str(git_named_next_path)],
+    ...     expected_code=1,
+    ...     expected_stdout=b'''------ git
+    ... ++++++ git.next
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,1 +1,1 @@ ============================================================\x1b[0m
+    ... \x1b[41m-|\x1b[0m \x1b[31mold\x1b[0m
+    ... \x1b[42m+|\x1b[0m \x1b[32mnew\x1b[0m
+    ... ''',
+    ... )
+    >>> git_named_path.unlink()
+
     >>> old_path = test.tmp / "git" / "old.txt"
     >>> new_path = test.tmp / "git" / "new.txt"
     >>> test.write_file(old_path, '''
