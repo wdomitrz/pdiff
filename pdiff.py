@@ -16,7 +16,7 @@ import os
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import BinaryIO, ClassVar, Literal, assert_never, cast
+from typing import Annotated, BinaryIO, ClassVar, Literal, assert_never, cast
 
 import typer
 
@@ -1246,7 +1246,7 @@ class GitExternalDiff:
             meta.append("deleted file mode " + self.old_mode)
         elif self.old_mode != self.new_mode:
             meta.extend(["old mode " + self.old_mode, "new mode " + self.new_mode])
-        if not diff_changed and not meta:
+        if not diff_changed and not meta and not self.info:
             return "", 0
 
         title = f"pdiff -git {prev_name} {next_name}"
@@ -1352,8 +1352,8 @@ class GitArgs:
     new_file: Path
     new_hex: str
     new_mode: str
-    new_path: str | None = None
-    info: str | None = None
+    new_path: Annotated[str | None, typer.Argument()] = None
+    info: Annotated[str | None, typer.Argument()] = None
     context: int = GitExternalDiff.DEFAULT_CONTEXT
     find_moves: bool = True
     color: str = "auto"
@@ -1687,6 +1687,37 @@ class Test:
     ... \x1b[41m-|\x1b[0m \x1b[31mbanana\x1b[0m
     ... \x1b[42m+|\x1b[0m \x1b[32mBANANA\x1b[0m
     ... \x1b[100m |\x1b[0m cherry
+    ... ''',
+    ... )
+
+    >>> rename_old_path = test.tmp / "git" / "rename-old.txt"
+    >>> rename_new_path = test.tmp / "git" / "rename-new.txt"
+    >>> test.write_file(rename_old_path, '''
+    ... unchanged
+    ... ''')
+    >>> test.write_file(rename_new_path, '''
+    ... unchanged
+    ... ''')
+    >>> _ = test.assert_run(
+    ...     [
+    ...         "git",
+    ...         "--color",
+    ...         "always",
+    ...         ".local/opt/findfile.nvim",
+    ...         str(rename_old_path),
+    ...         "aaa111",
+    ...         "100644",
+    ...         str(rename_new_path),
+    ...         "bbb222",
+    ...         "100644",
+    ...         ".local/opt/nvim_plugins/findfile.nvim",
+    ...         "similarity index 100%\nrename from .local/opt/findfile.nvim\nrename to .local/opt/nvim_plugins/findfile.nvim",
+    ...     ],
+    ...     expected_code=0,
+    ...     expected_stdout=b'''\x1b[1mpdiff -git a/.local/opt/findfile.nvim b/.local/opt/nvim_plugins/findfile.nvim\x1b[0m
+    ... similarity index 100%
+    ... rename from .local/opt/findfile.nvim
+    ... rename to .local/opt/nvim_plugins/findfile.nvim
     ... ''',
     ... )
 
