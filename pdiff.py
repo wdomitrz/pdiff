@@ -430,6 +430,9 @@ class LineDiff:
 
 @dataclass(frozen=True, kw_only=True)
 class MoveDetector:
+    MAX_FUZZY_MOVE_COMPARISONS: ClassVar[int] = 40_000
+    MIN_FUZZY_MOVE_SIMILARITY: ClassVar[float] = 0.5
+
     ranges: list[Range]
     ignore_whitespace: bool
 
@@ -498,7 +501,10 @@ class MoveDetector:
                 move_id += 1
 
         unmatched_prevs, unmatched_nexts = self.unmatched_candidates(ranges=ranges)
-        if len(unmatched_prevs) * len(unmatched_nexts) <= 40000:
+        if (
+            len(unmatched_prevs) * len(unmatched_nexts)
+            <= self.MAX_FUZZY_MOVE_COMPARISONS
+        ):
             for p in unmatched_prevs:
                 prev_kind = ranges[p.range_index].kind
                 match prev_kind:
@@ -522,7 +528,7 @@ class MoveDetector:
                         prev=ranges[p.range_index].prev,
                         next_=ranges[n.range_index].next,
                     )
-                    if score >= 0.5 and score > best_score:
+                    if score >= self.MIN_FUZZY_MOVE_SIMILARITY and score > best_score:
                         best_idx, best_score = j, score
                 if best_idx != -1:
                     n = unmatched_nexts[best_idx]
@@ -1202,28 +1208,29 @@ class DirectoryDiff:
 class GitExternalDiff:
     DEFAULT_CONTEXT: ClassVar[int] = 3
     NULL_SHA: ClassVar[str] = "."
-    USAGE: ClassVar[str] = (
-        "usage: pdiff git path old-file old-hex old-mode new-file new-hex new-mode [new-path] [info]"
-    )
 
-    args: list[str]
+    path: str
+    old_file: Path
+    old_hex: str
+    old_mode: str
+    new_file: Path
+    new_hex: str
+    new_mode: str
+    new_path: str | None
+    info: str | None
     context: int
     color: bool
     ignore_whitespace: bool
     find_moves: bool
 
     def run(self) -> tuple[str, int]:
-        if len(self.args) < 7 or len(self.args) > 9:
-            raise ValueError(self.USAGE)
-        path, old_file, old_hex, old_mode, new_file, new_hex, new_mode = self.args[:7]
-        new_path = self.args[7] if len(self.args) >= 8 else path
-        info = self.args[8] if len(self.args) >= 9 else ""
-        prev_name, next_name = "a/" + path, "b/" + new_path
-        is_new_file = old_hex == self.NULL_SHA
-        is_deleted_file = new_hex == self.NULL_SHA
+        new_path = self.new_path if self.new_path is not None else self.path
+        prev_name, next_name = "a/" + self.path, "b/" + new_path
+        is_new_file = self.old_hex == self.NULL_SHA
+        is_deleted_file = self.new_hex == self.NULL_SHA
         diff_out, diff_changed = FileDiff(
-            prev_data=self.read_side(sha=old_hex, path=old_file),
-            next_data=self.read_side(sha=new_hex, path=new_file),
+            prev_data=self.read_side(sha=self.old_hex, path=self.old_file),
+            next_data=self.read_side(sha=self.new_hex, path=self.new_file),
             prev_name=prev_name,
             next_name=next_name,
             context=self.context,
@@ -1234,29 +1241,29 @@ class GitExternalDiff:
 
         meta: list[str] = []
         if is_new_file:
-            meta.append("new file mode " + new_mode)
+            meta.append("new file mode " + self.new_mode)
         elif is_deleted_file:
-            meta.append("deleted file mode " + old_mode)
-        elif old_mode != new_mode:
-            meta.extend(["old mode " + old_mode, "new mode " + new_mode])
+            meta.append("deleted file mode " + self.old_mode)
+        elif self.old_mode != self.new_mode:
+            meta.extend(["old mode " + self.old_mode, "new mode " + self.new_mode])
         if not diff_changed and not meta:
             return "", 0
 
         title = f"pdiff -git {prev_name} {next_name}"
         out = [UnifiedRenderer.ansi("1", title) + "\n" if self.color else title + "\n"]
         out.extend(m + "\n" for m in meta)
-        if info:
-            out.append(info + "\n")
+        if self.info:
+            out.append(self.info + "\n")
         if diff_changed and not is_new_file and not is_deleted_file:
-            out.append(f"index {old_hex}..{new_hex}\n")
+            out.append(f"index {self.old_hex}..{self.new_hex}\n")
         out.append(diff_out)
         return "".join(out), 1
 
     @classmethod
-    def read_side(cls, *, sha: str, path: str) -> bytes:
+    def read_side(cls, *, sha: str, path: Path) -> bytes:
         if sha == cls.NULL_SHA:
             return b""
-        return Path(path).read_bytes()
+        return path.read_bytes()
 
 
 class Color:
@@ -1284,8 +1291,8 @@ class Color:
 
 @dataclass(frozen=True, kw_only=True)
 class Args:
-    old_path: str
-    new_path: str
+    old_path: Path
+    new_path: Path
     context: int = 16
     find_moves: bool = True
     color: str = "auto"
@@ -1298,8 +1305,8 @@ class Args:
         assert self.context >= 0
 
         out, changed = PathDiff(
-            prev_path=Path(self.old_path),
-            next_path=Path(self.new_path),
+            prev_path=self.old_path,
+            next_path=self.new_path,
             context=self.context,
             color=Color.use(
                 color_mode=cast(Color.Mode, self.color),
@@ -1339,10 +1346,10 @@ class StdinArgs:
 @dataclass(frozen=True, kw_only=True)
 class GitArgs:
     path: str
-    old_file: str
+    old_file: Path
     old_hex: str
     old_mode: str
-    new_file: str
+    new_file: Path
     new_hex: str
     new_mode: str
     new_path: str | None = None
@@ -1357,21 +1364,16 @@ class GitArgs:
 
     def main(self) -> int:
         assert self.context >= 0
-        args = [
-            self.path,
-            self.old_file,
-            self.old_hex,
-            self.old_mode,
-            self.new_file,
-            self.new_hex,
-            self.new_mode,
-        ]
-        if self.new_path is not None:
-            args.append(self.new_path)
-        if self.info is not None:
-            args.append(self.info)
         out, _code = GitExternalDiff(
-            args=args,
+            path=self.path,
+            old_file=self.old_file,
+            old_hex=self.old_hex,
+            old_mode=self.old_mode,
+            new_file=self.new_file,
+            new_hex=self.new_hex,
+            new_mode=self.new_mode,
+            new_path=self.new_path,
+            info=self.info,
             context=self.context,
             color=Color.use(
                 color_mode=cast(Color.Mode, self.color),
