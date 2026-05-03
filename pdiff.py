@@ -1039,6 +1039,143 @@ def is_binary(data: bytes) -> bool:
     return b"\0" in data
 
 
+PathKind = Literal["file", "dir", "other", "missing"]
+
+
+def path_kind(path: Path) -> PathKind:
+    if path.is_file():
+        return "file"
+    if path.is_dir():
+        return "dir"
+    if path.exists():
+        return "other"
+    return "missing"
+
+
+def diff_paths(
+    *,
+    prev_path: Path,
+    next_path: Path,
+    context: int,
+    color: bool,
+    ignore_whitespace: bool,
+    find_moves: bool,
+) -> tuple[str, bool]:
+    prev_kind = path_kind(prev_path)
+    next_kind = path_kind(next_path)
+    match (prev_kind, next_kind):
+        case ("file", "file"):
+            return diff_output(
+                prev_data=prev_path.read_bytes(),
+                next_data=next_path.read_bytes(),
+                prev_name=str(prev_path),
+                next_name=str(next_path),
+                context=context,
+                color=color,
+                ignore_whitespace=ignore_whitespace,
+                find_moves=find_moves,
+            )
+        case ("dir", "dir"):
+            return diff_dirs(
+                prev_dir=prev_path,
+                next_dir=next_path,
+                context=context,
+                color=color,
+                ignore_whitespace=ignore_whitespace,
+                find_moves=find_moves,
+            )
+        case ("missing", "file"):
+            return diff_output(
+                prev_data=b"",
+                next_data=next_path.read_bytes(),
+                prev_name="/dev/null",
+                next_name=str(next_path),
+                context=context,
+                color=color,
+                ignore_whitespace=ignore_whitespace,
+                find_moves=find_moves,
+            )
+        case ("file", "missing"):
+            return diff_output(
+                prev_data=prev_path.read_bytes(),
+                next_data=b"",
+                prev_name=str(prev_path),
+                next_name="/dev/null",
+                context=context,
+                color=color,
+                ignore_whitespace=ignore_whitespace,
+                find_moves=find_moves,
+            )
+        case _:
+            return f"Files {prev_path} and {next_path} are not the same type\n", True
+
+
+def diff_dirs(
+    *,
+    prev_dir: Path,
+    next_dir: Path,
+    context: int,
+    color: bool,
+    ignore_whitespace: bool,
+    find_moves: bool,
+) -> tuple[str, bool]:
+    out: list[str] = []
+    changed = False
+    prev_names = {path.name for path in prev_dir.iterdir()}
+    next_names = {path.name for path in next_dir.iterdir()}
+
+    for name in sorted(prev_names - next_names):
+        changed = True
+        out.append(f"Only in {prev_dir}: {name}\n")
+        path = prev_dir / name
+        if path.is_file():
+            diff_out, _ = diff_output(
+                prev_data=path.read_bytes(),
+                next_data=b"",
+                prev_name=str(path),
+                next_name="/dev/null",
+                context=context,
+                color=color,
+                ignore_whitespace=ignore_whitespace,
+                find_moves=find_moves,
+            )
+            out.append(diff_out)
+
+    for name in sorted(next_names - prev_names):
+        changed = True
+        out.append(f"Only in {next_dir}: {name}\n")
+        path = next_dir / name
+        if path.is_file():
+            diff_out, _ = diff_output(
+                prev_data=b"",
+                next_data=path.read_bytes(),
+                prev_name="/dev/null",
+                next_name=str(path),
+                context=context,
+                color=color,
+                ignore_whitespace=ignore_whitespace,
+                find_moves=find_moves,
+            )
+            out.append(diff_out)
+
+    for name in sorted(prev_names & next_names):
+        prev_path = prev_dir / name
+        next_path = next_dir / name
+        diff_out, diff_changed = diff_paths(
+            prev_path=prev_path,
+            next_path=next_path,
+            context=context,
+            color=color,
+            ignore_whitespace=ignore_whitespace,
+            find_moves=find_moves,
+        )
+        if diff_changed:
+            changed = True
+            out.append(diff_out)
+
+    return "".join(out), changed
+
+
 def invoked_by_git() -> bool:
     return bool(
         os.environ.get("GIT_DIFF_PATH_COUNTER") or os.environ.get("GIT_EXTERNAL_DIFF")
@@ -1134,14 +1271,9 @@ class Args:
     def main(self) -> int:
         assert self.context >= 0
 
-        prev_data = Path(self.old_path).read_bytes()
-        next_data = Path(self.new_path).read_bytes()
-
-        out, changed = diff_output(
-            prev_data=prev_data,
-            next_data=next_data,
-            prev_name=self.old_path,
-            next_name=self.new_path,
+        out, changed = diff_paths(
+            prev_path=Path(self.old_path),
+            next_path=Path(self.new_path),
             context=self.context,
             color=use_color(
                 color_mode=cast(ColorMode, self.color),

@@ -12,6 +12,8 @@ Inspired by [patdiff](https://github.com/janestreet/patdiff) and [pdiff_go](http
 ./pdiff.py diff OLD NEW
 ```
 
+`OLD` and `NEW` may be files or directories.
+
 ### git
 
 ```sh

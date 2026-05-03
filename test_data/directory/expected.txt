@@ -1,0 +1,21 @@
+Only in test_data/directory/old: removed.txt
+------ test_data/directory/old/removed.txt
+++++++ /dev/null
+[100m@|[0m [1m@@ -1,1 +1,0 @@ ============================================================[0m
+[41m-|[0m [31mremoved[0m
+Only in test_data/directory/new: added.txt
+------ /dev/null
+++++++ test_data/directory/new/added.txt
+[100m@|[0m [1m@@ -1,0 +1,1 @@ ============================================================[0m
+[42m+|[0m [32madded[0m
+------ test_data/directory/old/changed.txt
+++++++ test_data/directory/new/changed.txt
+[100m@|[0m [1m@@ -1,1 +1,1 @@ ============================================================[0m
+[41m-|[0m [31mold[0m[90m value[0m
+[42m+|[0m [32mnew[0m value
+------ test_data/directory/old/subdir/nested.txt
+++++++ test_data/directory/new/subdir/nested.txt
+[100m@|[0m [1m@@ -1,1 +1,1 @@ ============================================================[0m
+[41m-|[0m [31mold[0m[90m nested[0m
+[42m+|[0m [32mnew[0m nested
+Files test_data/directory/old/typeflip and test_data/directory/new/typeflip are not the same type

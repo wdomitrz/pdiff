@@ -51,14 +51,19 @@ def assert_diff_case(
     expected_stdout: bytes | None = None,
 ) -> bytes:
     case_dir = DATA / name
+    old_path = case_dir / "old.txt"
+    new_path = case_dir / "new.txt"
+    if not old_path.exists() and not new_path.exists():
+        old_path = case_dir / "old"
+        new_path = case_dir / "new"
     return assert_run(
         [
             "diff",
             "--color",
             "always",
             *(args or []),
-            str(case_dir.relative_to(ROOT) / "old.txt"),
-            str(case_dir.relative_to(ROOT) / "new.txt"),
+            str(old_path.relative_to(ROOT)),
+            str(new_path.relative_to(ROOT)),
         ],
         expected_code=expected_code,
         expected_stdout=(
@@ -75,6 +80,7 @@ def main() -> None:
     assert_diff_case("whitespace", args=["--whitespace"])
     assert_diff_case("move")
     assert_diff_case("indent")
+    assert_diff_case("directory")
 
     assert_run(
         ["stdin", "--color", "always"],
