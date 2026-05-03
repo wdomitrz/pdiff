@@ -1,0 +1,16 @@
+------ test_data/move_old.txt
+++++++ test_data/move_new.txt
+@| @@ -1,10 +1,10 @@ ============================================================
+ | alpha
+<| moved-one
+<| moved-two-old
+<| moved-three
+ | beta-1
+ | beta-2
+ | beta-3
+ | beta-4
+ | beta-5
+>| moved-one
+>| moved-two-new
+>| moved-three
+ | gamma

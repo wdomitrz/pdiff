@@ -652,7 +652,7 @@ def write_line(*, out: list[str], kind: str, text: str, color: bool) -> None:
         style = line_text_style(kind)
         if style:
             text = ansi(style, text)
-    out.append(f"{prefix} {text}\n")
+    out.append(f"{prefix}\n" if text == "" else f"{prefix} {text}\n")
 
 
 def write_refined_line(
@@ -661,6 +661,9 @@ def write_refined_line(
     prefix = line_prefix(kind)
     if color:
         prefix = ansi(line_prefix_style(kind), prefix)
+    if not line:
+        out.append(prefix + "\n")
+        return
     parts = [prefix, " "]
     for seg in line:
         text = seg.text
@@ -988,7 +991,7 @@ def remap_ranges_to_original(
         match r.kind:
             case "same":
                 n = len(r.prev)
-                out.append(Range(kind="same", prev=prev_orig[pi : pi + n]))
+                out.append(Range(kind="same", prev=next_orig[ni : ni + n]))
                 pi += n
                 ni += n
             case "prev":

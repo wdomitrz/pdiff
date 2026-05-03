@@ -60,13 +60,13 @@ Makefile targets:
 - `make fix`
 - `make lint`
 - `make check`
-- `make smoke_tests`
+- `make test`
 
 `make check` runs:
 - `ruff check .`
 - `basedpyright --project pyproject.toml --level error .`
 - doctests
-- `test_data/smoke_tests.py`
+- `test_data/test.py`
 
 Checked-in smoke fixtures live under `test_data/`:
 - `simple_old.txt`
@@ -77,7 +77,7 @@ Checked-in smoke fixtures live under `test_data/`:
 - `whitespace_expected.txt`
 - `stdin_unified.diff`
 - `git_expected.txt`
-- `smoke_tests.py`
+- `test.py`
 
 ## Current Refactor Notes
 

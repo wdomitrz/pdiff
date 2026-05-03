@@ -13,4 +13,4 @@ fix:
 
 test:
 	python3 -m doctest README.md $(wildcard *.py)
-	python3 test_data/smoke_tests.py
+	python3 test_data/test.py

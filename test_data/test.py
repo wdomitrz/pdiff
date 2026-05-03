@@ -105,6 +105,34 @@ def main() -> None:
         expected_stdout=(DATA / "whitespace_expected.txt").read_bytes(),
     )
 
+    assert_run(
+        [
+            "diff",
+            "--color",
+            "never",
+            "test_data/move_old.txt",
+            "test_data/move_new.txt",
+        ],
+        expected_code=1,
+        expected_stdout=(DATA / "move_expected.txt").read_bytes(),
+    )
+
+    indent_stdout = assert_run(
+        [
+            "diff",
+            "--color",
+            "never",
+            "test_data/indent_old.txt",
+            "test_data/indent_new.txt",
+        ],
+        expected_code=1,
+        expected_stdout=(DATA / "indent_expected.txt").read_bytes(),
+    )
+    if b" |         print(y)\n" not in indent_stdout:
+        raise AssertionError("indent diff context should render from the new file")
+    if b" |     print(y)\n" in indent_stdout:
+        raise AssertionError("indent diff context rendered old-file indentation")
+
     stdin_color = assert_run(
         ["stdin", "--color", "always"],
         expected_code=0,
