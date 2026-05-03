@@ -37,22 +37,9 @@ def assert_run(
     input_data: bytes | None = None,
 ) -> bytes:
     result = run(args, input_data=input_data)
-    if result.returncode != expected_code:
-        raise AssertionError(
-            f"{args} exited {result.returncode}, expected {expected_code}\n"
-            f"stdout:\n{result.stdout.decode(errors='replace')}\n"
-            f"stderr:\n{result.stderr.decode(errors='replace')}"
-        )
-    if expected_stdout is not None and result.stdout != expected_stdout:
-        raise AssertionError(
-            f"{args} stdout mismatch\n"
-            f"want:\n{expected_stdout.decode(errors='replace')}\n"
-            f"got:\n{result.stdout.decode(errors='replace')}"
-        )
-    if result.stderr:
-        raise AssertionError(
-            f"{args} wrote stderr:\n{result.stderr.decode(errors='replace')}"
-        )
+    assert result.returncode == expected_code
+    assert expected_stdout is None or result.stdout == expected_stdout
+    assert not result.stderr
     return result.stdout
 
 
@@ -83,28 +70,18 @@ def assert_diff_case(
 
 
 def main() -> None:
-    simple_stdout = assert_diff_case("simple")
-    if b"\x1b[41m-|\x1b[0m" not in simple_stdout:
-        raise AssertionError("colored diff output is missing red deletion marker")
-
+    assert_diff_case("simple")
     assert_diff_case("whitespace", expected_code=0, expected_stdout=b"")
     assert_diff_case("whitespace", args=["--whitespace"])
-
     assert_diff_case("move")
+    assert_diff_case("indent")
 
-    indent_stdout = assert_diff_case("indent")
-    if b"\x1b[100m |\x1b[0m         print(y)\n" not in indent_stdout:
-        raise AssertionError("indent diff context should render from the new file")
-    if b"\x1b[100m |\x1b[0m     print(y)\n" in indent_stdout:
-        raise AssertionError("indent diff context rendered old-file indentation")
-
-    stdin_color = assert_run(
+    assert_run(
         ["stdin", "--color", "always"],
         expected_code=0,
         input_data=(DATA / "stdin" / "input.diff").read_bytes(),
+        expected_stdout=(DATA / "stdin" / "expected.txt").read_bytes(),
     )
-    if b"\x1b[" not in stdin_color or b"banana" not in stdin_color:
-        raise AssertionError("stdin refined color output is missing expected ANSI/text")
 
     assert_run(
         [
