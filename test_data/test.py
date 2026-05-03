@@ -78,6 +78,7 @@ def main() -> None:
     assert_diff_case("whitespace", args=["--whitespace"])
     assert_diff_case("move")
     assert_diff_case("indent")
+    assert_diff_case("indent_move")
     assert_diff_case("directory")
 
     assert_run(

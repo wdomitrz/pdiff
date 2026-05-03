@@ -1,0 +1,15 @@
+class X:
+    x: int
+
+def b(asdf):
+    print(asdf)
+
+def c():
+    b(7)
+    b("asdf")
+    b("zxcv")
+
+def a(self: X) -> None:
+    y = self.x + 7
+    z = self.x + 5 * y
+    print(y, z)
