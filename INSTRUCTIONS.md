@@ -8,7 +8,7 @@
 - Separate data processing from printing/rendering.
 - Use precise `Literal[...]` aliases for string-mode values and kind dispatch. Avoid `Enum` when simple literals are enough.
 - Prefer exhaustive `match` statements over kind `if`/`elif` chains. Include `case _:` with `assert_never(...)`.
-- For tuple matches, a walrus-bound subject is acceptable when it helps type checkers understand `assert_never`.
+- A walrus-bound subject is acceptable when it helps type checkers understand `assert_never`.
 - Do not over-abstract. Remove dataclasses or wrappers that only add ceremony.
 - Do not overuse `try`/`except`. Let normal exceptions propagate unless handling them adds real recovery or materially better behavior.
 - Use `list[...]` for variable-size collections and `tuple[...]` for fixed-size return pairs.
