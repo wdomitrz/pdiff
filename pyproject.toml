@@ -1,8 +1,16 @@
 [tool.ruff.lint]
 select = ["ALL"]
-ignore = ["COM812", "D", "E501", "S101", "S603", "TC006", "INP001", "PLR2004", "C901", "PLR0911", "PLR0912", "PLR0915"]
+ignore = [
+    "COM8",
+    "D",
+    "E501",
+    "S101", "S603",
+    "TC003", "TC006",
+    "INP001",
+    "C901",
+    "PLR09",
+]
 extend-select = ["I"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
-extraPaths = ["/usr/lib/python3/dist-packages"]
