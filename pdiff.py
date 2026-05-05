@@ -675,6 +675,7 @@ class UnifiedRenderer:
         "same", "prev", "next", "unified", "hunk", "move_from", "move_to"
     ]
     RefinedLineKind = Literal["prev", "next", "move_from", "move_to"]
+    CLEAR_EOL: ClassVar[str] = "\x1b[0m \x1b[0m\x1b[K"
 
     prev_name: str
     next_name: str
@@ -732,9 +733,13 @@ class UnifiedRenderer:
         if self.color:
             prefix = self.ansi(self.line_prefix_style(kind), prefix)
             style = self.line_text_style(kind)
-            if style:
+            if style and text:
                 text = self.ansi(style, text)
-        out.append(f"{prefix}\n" if text == "" else f"{prefix} {text}\n")
+        out.append(
+            f"{prefix}{self.end_line()}"
+            if text == ""
+            else f"{prefix} {text}{self.end_line()}"
+        )
 
     def write_refined_line(
         self, *, out: list[str], kind: RefinedLineKind, line: RefinedLine
@@ -743,7 +748,7 @@ class UnifiedRenderer:
         if self.color:
             prefix = self.ansi(self.line_prefix_style(kind), prefix)
         if not line:
-            out.append(prefix + "\n")
+            out.append(prefix + self.end_line())
             return
         parts = [prefix, " "]
         for seg in line:
@@ -753,8 +758,11 @@ class UnifiedRenderer:
                 if style:
                     text = self.ansi(style, text)
             parts.append(text)
-        parts.append("\n")
+        parts.append(self.end_line())
         out.append("".join(parts))
+
+    def end_line(self) -> str:
+        return self.CLEAR_EOL + "\n" if self.color else "\n"
 
     @staticmethod
     def line_prefix(kind: LineKind) -> str:
@@ -839,7 +847,39 @@ class UnifiedRenderer:
 
     @staticmethod
     def ansi(style: str, s: str) -> str:
+        """
+        >>> UnifiedRenderer.ansi("31", "red\\nline")
+        '\\x1b[31mred\\x1b[0m\\n\\x1b[31mline\\x1b[0m'
+        >>> UnifiedRenderer.ansi("90", "gray\\r\\n")
+        '\\x1b[90mgray\\x1b[0m\\r\\n'
+        >>> "\\x1b[31m\\n" in UnifiedRenderer.ansi("31", "red\\n")
+        False
+        """
+        out: list[str] = []
+        start = 0
+        for i, char in enumerate(s):
+            if char not in "\r\n":
+                continue
+            if start < i:
+                out.append(f"\x1b[{style}m{s[start:i]}\x1b[0m")
+            out.append(char)
+            start = i + 1
+        if start < len(s):
+            out.append(f"\x1b[{style}m{s[start:]}\x1b[0m")
+        if out:
+            return "".join(out)
         return f"\x1b[{style}m{s}\x1b[0m"
+
+    @classmethod
+    def colored_line(cls, text: str) -> str:
+        """
+        >>> e = chr(27)
+        >>> UnifiedRenderer.colored_line("x") == "x" + e + "[0m " + e + "[0m" + e + "[K" + chr(10)
+        True
+        >>> UnifiedRenderer.colored_line("x").endswith(e + "[0m " + e + "[0m" + e + "[K" + chr(10))
+        True
+        """
+        return text + cls.CLEAR_EOL + "\n"
 
     @staticmethod
     def refined_plain(line: RefinedLine) -> str:
@@ -912,7 +952,7 @@ class StdinDiffRefiner:
     def write_meta_line(self, *, out: list[str], line: str) -> None:
         if self.color and line.startswith("@@"):
             line = UnifiedRenderer.ansi("1", line)
-        out.append(line + "\n")
+        out.append(UnifiedRenderer.colored_line(line) if self.color else line + "\n")
 
     def write_plain_line(self, *, out: list[str], prefix: Prefix, text: str) -> None:
         line = prefix + text
@@ -920,7 +960,7 @@ class StdinDiffRefiner:
             line = UnifiedRenderer.ansi("31", line)
         elif self.color and prefix == "+":
             line = UnifiedRenderer.ansi("32", line)
-        out.append(line + "\n")
+        out.append(UnifiedRenderer.colored_line(line) if self.color else line + "\n")
 
     def write_refined_line(
         self, *, out: list[str], prefix: Prefix, line: RefinedLine
@@ -935,7 +975,7 @@ class StdinDiffRefiner:
             if style:
                 text = UnifiedRenderer.ansi(style, text)
             parts.append(text)
-        out.append("".join(parts) + "\n")
+        out.append(UnifiedRenderer.colored_line("".join(parts)))
 
     @staticmethod
     def refined_segment_style(*, prefix: Prefix, seg_kind: Kind) -> str:
@@ -985,6 +1025,11 @@ class FileDiff:
         !| x  = 1
         >>> "\\x1b[41m-|" in FileDiff(prev_data=b"a\\n", next_data=b"b\\n", prev_name="old", next_name="new", context=16, color=True, ignore_whitespace=False, find_moves=False).output()[0]
         True
+        >>> colored = FileDiff(prev_data=b"old\\n\\nsame\\n", next_data=b"new\\nsame\\n", prev_name="old", next_name="new", context=16, color=True, ignore_whitespace=False, find_moves=False).output()[0]
+        >>> "\\x1b[K\\n" in colored
+        True
+        >>> Test.has_active_color_at_eol(colored)
+        False
         """
         if self.prev_data == self.next_data:
             return "", False
@@ -1249,7 +1294,8 @@ class GitExternalDiff:
             return "", 0
 
         title = f"pdiff -git {prev_name} {next_name}"
-        out = [UnifiedRenderer.ansi("1", title) + "\n" if self.color else title + "\n"]
+        title = UnifiedRenderer.ansi("1", title) if self.color else title
+        out = [UnifiedRenderer.colored_line(title) if self.color else title + "\n"]
         out.extend(m + "\n" for m in meta)
         if self.info:
             out.append(self.info + "\n")
@@ -1877,8 +1923,9 @@ class Test:
             check=False,
         )
         stdout = result.stdout.replace(f"{self.tmp}/".encode(), b"")
+        stdout_for_assert = stdout.replace(UnifiedRenderer.CLEAR_EOL.encode(), b"")
         assert result.returncode == expected_code
-        assert expected_stdout is None or stdout == expected_stdout
+        assert expected_stdout is None or stdout_for_assert == expected_stdout
         assert not result.stderr
         return stdout
 
@@ -1908,6 +1955,25 @@ class Test:
             expected_code=expected_code,
             expected_stdout=expected,
         )
+
+    @staticmethod
+    def has_active_color_at_eol(text: str) -> bool:
+        import re  # noqa: PLC0415
+
+        active = False
+        i = 0
+        while i < len(text):
+            if text.startswith("\x1b[", i):
+                match = re.match(r"\x1b\[([0-9;]*)m", text[i:])
+                if match is not None:
+                    params = match.group(1).split(";") if match.group(1) else ["0"]
+                    active = "0" not in params
+                    i += len(match.group(0))
+                    continue
+            if text[i] in "\r\n" and active:
+                return True
+            i += 1
+        return False
 
 
 if __name__ == "__main__":
