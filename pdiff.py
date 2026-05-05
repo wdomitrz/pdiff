@@ -11,7 +11,9 @@ import os
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import BinaryIO, ClassVar, Literal, Protocol, assert_never, cast
+from typing import BinaryIO, ClassVar, Literal, Protocol, TypeAlias, cast
+
+from typing_extensions import assert_never
 
 Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
 Command = Literal["diff", "stdin", "git"]
@@ -671,10 +673,10 @@ class Text:
 
 @dataclass(frozen=True, kw_only=True)
 class UnifiedRenderer:
-    LineKind = Literal[
+    LineKind: TypeAlias = Literal[
         "same", "prev", "next", "unified", "hunk", "move_from", "move_to"
     ]
-    RefinedLineKind = Literal["prev", "next", "move_from", "move_to"]
+    RefinedLineKind: TypeAlias = Literal["prev", "next", "move_from", "move_to"]
     CLEAR_EOL: ClassVar[str] = "\x1b[0m \x1b[0m\x1b[K"
 
     prev_name: str
@@ -888,7 +890,7 @@ class UnifiedRenderer:
 
 @dataclass(frozen=True, kw_only=True)
 class StdinDiffRefiner:
-    Prefix = Literal["-", "+"]
+    Prefix: TypeAlias = Literal["-", "+"]
 
     data: bytes
     color: bool
@@ -1312,7 +1314,7 @@ class GitExternalDiff:
 
 
 class Color:
-    Mode = Literal["auto", "never", "always"]
+    Mode: TypeAlias = Literal["auto", "never", "always"]
     CHOICES: ClassVar[tuple[Mode, ...]] = ("auto", "never", "always")
 
     @staticmethod
@@ -1347,20 +1349,20 @@ class Args:
     @classmethod
     def add_parser(cls, subparsers: Subparsers) -> None:
         parser = subparsers.add_parser("diff")
-        parser.add_argument("--context", type=int, default=16)
-        parser.add_argument(
+        _ = parser.add_argument("--context", type=int, default=16)
+        _ = parser.add_argument(
             "--find-moves",
             action=argparse.BooleanOptionalAction,
             default=True,
         )
-        parser.add_argument("--color", choices=Color.CHOICES, default="auto")
-        parser.add_argument(
+        _ = parser.add_argument("--color", choices=Color.CHOICES, default="auto")
+        _ = parser.add_argument(
             "--whitespace",
             action=argparse.BooleanOptionalAction,
             default=False,
         )
-        parser.add_argument("old_path", type=Path)
-        parser.add_argument("new_path", type=Path)
+        _ = parser.add_argument("old_path", type=Path)
+        _ = parser.add_argument("new_path", type=Path)
 
     @classmethod
     def from_namespace(cls, namespace: argparse.Namespace) -> Args:
@@ -1389,7 +1391,7 @@ class Args:
             find_moves=self.find_moves,
         ).output()
         if out:
-            sys.stdout.write(out)
+            _ = sys.stdout.write(out)
 
         return 1 if changed else 0
 
@@ -1401,14 +1403,14 @@ class StdinArgs:
     @classmethod
     def add_parser(cls, subparsers: Subparsers) -> None:
         parser = subparsers.add_parser("stdin")
-        parser.add_argument("--color", choices=Color.CHOICES, default="auto")
+        _ = parser.add_argument("--color", choices=Color.CHOICES, default="auto")
 
     @classmethod
     def from_namespace(cls, namespace: argparse.Namespace) -> StdinArgs:
         return cls(color=cast(Color.Mode, namespace.color))
 
     def main(self) -> int:
-        sys.stdout.write(
+        _ = sys.stdout.write(
             StdinDiffRefiner(
                 data=sys.stdin.buffer.read(),
                 color=Color.use(
@@ -1440,29 +1442,29 @@ class GitArgs:
     @classmethod
     def add_parser(cls, subparsers: Subparsers) -> None:
         parser = subparsers.add_parser("git")
-        parser.add_argument(
+        _ = parser.add_argument(
             "--context", type=int, default=GitExternalDiff.DEFAULT_CONTEXT
         )
-        parser.add_argument(
+        _ = parser.add_argument(
             "--find-moves",
             action=argparse.BooleanOptionalAction,
             default=True,
         )
-        parser.add_argument("--color", choices=Color.CHOICES, default="auto")
-        parser.add_argument(
+        _ = parser.add_argument("--color", choices=Color.CHOICES, default="auto")
+        _ = parser.add_argument(
             "--whitespace",
             action=argparse.BooleanOptionalAction,
             default=False,
         )
-        parser.add_argument("path", type=Path)
-        parser.add_argument("old_file", type=Path)
-        parser.add_argument("old_hex")
-        parser.add_argument("old_mode")
-        parser.add_argument("new_file", type=Path)
-        parser.add_argument("new_hex")
-        parser.add_argument("new_mode")
-        parser.add_argument("new_path", nargs="?", type=Path)
-        parser.add_argument("info", nargs="?")
+        _ = parser.add_argument("path", type=Path)
+        _ = parser.add_argument("old_file", type=Path)
+        _ = parser.add_argument("old_hex")
+        _ = parser.add_argument("old_mode")
+        _ = parser.add_argument("new_file", type=Path)
+        _ = parser.add_argument("new_hex")
+        _ = parser.add_argument("new_mode")
+        _ = parser.add_argument("new_path", nargs="?", type=Path)
+        _ = parser.add_argument("info", nargs="?")
 
     @classmethod
     def from_namespace(cls, namespace: argparse.Namespace) -> GitArgs:
@@ -1504,7 +1506,7 @@ class GitArgs:
             find_moves=self.find_moves,
         ).run()
         if out:
-            sys.stdout.write(out)
+            _ = sys.stdout.write(out)
         return 0
 
 
@@ -1892,7 +1894,7 @@ class Test:
     PDIFF: ClassVar[Path] = Path(__file__).resolve()
 
     def __init__(self, tmp: Path) -> None:
-        self.tmp = tmp
+        self.tmp: Path = tmp
 
     @staticmethod
     def input_text(value: str) -> bytes:
@@ -1903,7 +1905,7 @@ class Test:
     @classmethod
     def write_file(cls, path: Path, data: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(cls.input_text(data))
+        _ = path.write_bytes(cls.input_text(data))
 
     def assert_run(
         self,
