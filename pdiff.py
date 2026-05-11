@@ -19,6 +19,7 @@ from typing import BinaryIO, ClassVar, Literal, NoReturn, Protocol, TypeAlias, c
 def assert_never(arg: NoReturn) -> NoReturn:
     raise AssertionError(arg)
 
+
 Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
 Command = Literal["diff", "stdin", "git"]
 
