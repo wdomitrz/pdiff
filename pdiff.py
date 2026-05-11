@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -143,7 +145,7 @@ class Hunk:
                             prev_line=prev_line, next_line=next_line
                         )
                         if len(prefix) > context:
-                            prefix = prefix[-context:]
+                            prefix = prefix[-context:] if context else []
                     else:
                         same_after.extend(r.prev)
                         prev_line, next_line = r.advance(
@@ -1314,6 +1316,39 @@ class GitExternalDiff:
             return b""
         return path.read_bytes()
 
+    @classmethod
+    def default_context(cls) -> int:
+        if not Color.invoked_by_git():
+            return cls.DEFAULT_CONTEXT
+        configured_context = cls.git_config_context()
+        if configured_context is None:
+            return cls.DEFAULT_CONTEXT
+        return configured_context
+
+    @staticmethod
+    def git_config_context() -> int | None:
+        git = shutil.which("git")
+        if git is None:
+            return None
+        try:
+            result = subprocess.run(
+                [git, "config", "--get", "diff.context"],
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+        except OSError:
+            return None
+        if result.returncode != 0:
+            return None
+        try:
+            context = int(result.stdout.strip())
+        except ValueError:
+            return None
+        if context < 0:
+            return None
+        return context
+
 
 class Color:
     Mode: TypeAlias = Literal["auto", "never", "always"]
@@ -1351,7 +1386,9 @@ class Args:
     @classmethod
     def add_parser(cls, subparsers: Subparsers) -> None:
         parser = subparsers.add_parser("diff")
-        _ = parser.add_argument("--context", type=int, default=16)
+        _ = parser.add_argument(
+            "-U", "--unified", "--context", dest="context", type=int, default=16
+        )
         _ = parser.add_argument(
             "--find-moves",
             action=argparse.BooleanOptionalAction,
@@ -1436,7 +1473,7 @@ class GitArgs:
     new_mode: str
     new_path: Path | None = None
     info: str | None = None
-    context: int = GitExternalDiff.DEFAULT_CONTEXT
+    context: int | None = None
     find_moves: bool = True
     color: Color.Mode = "auto"
     whitespace: bool = False
@@ -1445,7 +1482,7 @@ class GitArgs:
     def add_parser(cls, subparsers: Subparsers) -> None:
         parser = subparsers.add_parser("git")
         _ = parser.add_argument(
-            "--context", type=int, default=GitExternalDiff.DEFAULT_CONTEXT
+            "-U", "--unified", "--context", dest="context", type=int, default=None
         )
         _ = parser.add_argument(
             "--find-moves",
@@ -1487,7 +1524,10 @@ class GitArgs:
         )
 
     def main(self) -> int:
-        assert self.context >= 0
+        context = (
+            GitExternalDiff.default_context() if self.context is None else self.context
+        )
+        assert context >= 0
         out, _code = GitExternalDiff(
             path=self.path,
             old_file=self.old_file,
@@ -1498,7 +1538,7 @@ class GitArgs:
             new_mode=self.new_mode,
             new_path=self.new_path,
             info=self.info,
-            context=self.context,
+            context=context,
             color=Color.use(
                 color_mode=self.color,
                 stdout=sys.stdout.buffer,
@@ -1856,6 +1896,18 @@ class Test:
     ... \x1b[41m-|\x1b[0m \x1b[31mbanana\x1b[0m
     ... \x1b[42m+|\x1b[0m \x1b[32mBANANA\x1b[0m
     ... \x1b[100m |\x1b[0m cherry
+    ... ''',
+    ... )
+    >>> _ = test.assert_run(
+    ...     ["git", "--color", "always", "-U0", "file.txt", str(old_path), "aaa111", "100644", str(new_path), "bbb222", "100644"],
+    ...     expected_code=0,
+    ...     expected_stdout=b'''\x1b[1mpdiff -git a/file.txt b/file.txt\x1b[0m
+    ... index aaa111..bbb222
+    ... ------ a/file.txt
+    ... ++++++ b/file.txt
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -2,1 +2,1 @@ ============================================================\x1b[0m
+    ... \x1b[41m-|\x1b[0m \x1b[31mbanana\x1b[0m
+    ... \x1b[42m+|\x1b[0m \x1b[32mBANANA\x1b[0m
     ... ''',
     ... )
 

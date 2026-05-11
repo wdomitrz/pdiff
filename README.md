@@ -26,4 +26,4 @@ git config --global diff.external '<path_to>/pdiff.py git'
 git diff | ./pdiff.py stdin
 ```
 
-Useful options: `--color always|auto|never`, `--context N`, `--whitespace`, `--no-find-moves`.
+Useful options: `--color always|auto|never`, `-U N`/`--context N`, `--whitespace`, `--no-find-moves`.
