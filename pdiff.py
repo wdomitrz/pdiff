@@ -13,12 +13,9 @@ import subprocess
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import BinaryIO, ClassVar, Literal, NoReturn, Protocol, TypeAlias, cast
+from typing import BinaryIO, ClassVar, Literal, Protocol, TypeAlias, cast
 
-
-def assert_never(arg: NoReturn) -> NoReturn:
-    raise AssertionError(arg)
-
+from typing_extensions import assert_never
 
 Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
 Command = Literal["diff", "stdin", "git"]
