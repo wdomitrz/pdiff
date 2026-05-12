@@ -3,6 +3,13 @@
 # Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
 # AGPL License
 ################################################################
+#
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "typing-extensions>=4.1; python_version < '3.11'",
+# ]
+# ///
 
 from __future__ import annotations
 
@@ -15,7 +22,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import BinaryIO, ClassVar, Literal, Protocol, TypeAlias, cast
 
-from typing_extensions import assert_never
+if sys.version_info >= (3, 11):
+    from typing import Self, assert_never  # pyright: ignore[reportUnreachable]
+else:
+    from typing_extensions import (
+        Self,
+        assert_never,
+    )
 
 Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
 Command = Literal["diff", "stdin", "git"]
@@ -1402,7 +1415,7 @@ class Args:
         _ = parser.add_argument("new_path", type=Path)
 
     @classmethod
-    def from_namespace(cls, namespace: argparse.Namespace) -> Args:
+    def from_namespace(cls, namespace: argparse.Namespace) -> Self:
         return cls(
             old_path=cast(Path, namespace.old_path),
             new_path=cast(Path, namespace.new_path),
@@ -1443,7 +1456,7 @@ class StdinArgs:
         _ = parser.add_argument("--color", choices=Color.CHOICES, default="auto")
 
     @classmethod
-    def from_namespace(cls, namespace: argparse.Namespace) -> StdinArgs:
+    def from_namespace(cls, namespace: argparse.Namespace) -> Self:
         return cls(color=cast(Color.Mode, namespace.color))
 
     def main(self) -> int:
@@ -1504,7 +1517,7 @@ class GitArgs:
         _ = parser.add_argument("info", nargs="?")
 
     @classmethod
-    def from_namespace(cls, namespace: argparse.Namespace) -> GitArgs:
+    def from_namespace(cls, namespace: argparse.Namespace) -> Self:
         return cls(
             path=cast(Path, namespace.path),
             old_file=cast(Path, namespace.old_file),
@@ -1553,9 +1566,12 @@ class GitArgs:
 CLIArgs = Args | StdinArgs | GitArgs
 
 
+@dataclass(frozen=True, kw_only=True)
 class CLI:
+    args: CLIArgs
+
     @classmethod
-    def from_argv(cls, argv: list[str] | None = None) -> CLIArgs:
+    def from_argv(cls, argv: list[str] | None = None) -> Self:
         parser = argparse.ArgumentParser(description="Pretty diff tool.")
         subparsers = parser.add_subparsers(dest="command", required=True)
         Args.add_parser(subparsers)
@@ -1566,13 +1582,16 @@ class CLI:
         command = cast(Command, namespace.command)
         match command:
             case "diff":
-                return Args.from_namespace(namespace)
+                return cls(args=Args.from_namespace(namespace))
             case "stdin":
-                return StdinArgs.from_namespace(namespace)
+                return cls(args=StdinArgs.from_namespace(namespace))
             case "git":
-                return GitArgs.from_namespace(namespace)
+                return cls(args=GitArgs.from_namespace(namespace))
             case _:
                 assert_never(command)
+
+    def main(self) -> int:
+        return self.args.main()
 
 
 class Test:
