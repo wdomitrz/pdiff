@@ -7,7 +7,6 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#   "typing-extensions>=4.1; python_version < '3.11'",
 # ]
 # ///
 
@@ -22,13 +21,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import BinaryIO, ClassVar, Literal, Protocol, TypeAlias, cast
 
-if sys.version_info >= (3, 11):
-    from typing import Self, assert_never  # pyright: ignore[reportUnreachable]
-else:
-    from typing_extensions import (
-        Self,
-        assert_never,
-    )
+from typing_extensions import Self, assert_never
 
 Kind = Literal["same", "prev", "next", "replace", "move_from", "move_to"]
 Command = Literal["diff", "stdin", "git"]
