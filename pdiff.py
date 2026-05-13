@@ -3,12 +3,6 @@
 # Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
 # AGPL License
 ################################################################
-#
-# /// script
-# requires-python = ">=3.10"
-# dependencies = [
-# ]
-# ///
 
 from __future__ import annotations
 
