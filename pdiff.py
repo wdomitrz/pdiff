@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass, field, replace
@@ -1177,13 +1178,16 @@ class PathDiff:
 
     @staticmethod
     def path_kind(path: Path) -> PathKind:
-        if path.is_file():
+        try:
+            mode = path.stat().st_mode
+        except OSError:
+            return "missing"
+
+        if stat.S_ISREG(mode) or stat.S_ISFIFO(mode):
             return "file"
-        if path.is_dir():
+        if stat.S_ISDIR(mode):
             return "dir"
-        if path.exists():
-            return "other"
-        return "missing"
+        return "other"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1586,6 +1590,31 @@ class Test:
     >>> import tempfile
     >>> tmp_dir = tempfile.TemporaryDirectory(prefix="pdiff-test-")
     >>> test = Test(Path(tmp_dir.name))
+
+    >>> fifo_old = test.tmp / "fifo-old"
+    >>> fifo_new = test.tmp / "fifo-new"
+    >>> os.mkfifo(fifo_old)
+    >>> os.mkfifo(fifo_new)
+    >>> import subprocess
+    >>> writer_code = "import sys; open(sys.argv[1], 'wb').write(sys.argv[2].encode())"
+    >>> old_writer = subprocess.Popen(
+    ...     [sys.executable, "-c", writer_code, str(fifo_old), "asdf\n"]
+    ... )
+    >>> new_writer = subprocess.Popen(
+    ...     [sys.executable, "-c", writer_code, str(fifo_new), "zxcv\n"]
+    ... )
+    >>> _ = test.assert_run(
+    ...     ["diff", "--color", "always", str(fifo_old), str(fifo_new)],
+    ...     expected_code=1,
+    ...     expected_stdout=b'''------ fifo-old
+    ... ++++++ fifo-new
+    ... \x1b[100m@|\x1b[0m \x1b[1m@@ -1,1 +1,1 @@ ============================================================\x1b[0m
+    ... \x1b[41m-|\x1b[0m \x1b[31masdf\x1b[0m
+    ... \x1b[42m+|\x1b[0m \x1b[32mzxcv\x1b[0m
+    ... ''',
+    ... )
+    >>> old_writer.wait(timeout=5), new_writer.wait(timeout=5)
+    (0, 0)
 
     >>> _ = test.assert_diff(
     ...     "simple",
